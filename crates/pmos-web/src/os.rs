@@ -1,7 +1,7 @@
 //! The OS runtime: winit event loop on the stage canvas, async wgpu init,
 //! per-frame glue between kernel, shell and egui (Architecture §7).
 
-use pmos_apps::shell::{Shell, StageView};
+use pmos_apps::shell::Shell;
 use pmos_kernel::wgpu;
 use pmos_kernel::{gfx::Gfx, Kernel};
 use std::cell::RefCell;
@@ -119,25 +119,12 @@ impl OsApp {
 
         let time = (now_secs() - self.boot_time) as f32;
         let raw_input = egui_state.take_egui_input(window);
-        let ppp = self.egui_ctx.pixels_per_point();
-
-        let stage = {
-            let gfx = self.kernel.gfx.as_ref().unwrap();
-            StageView {
-                view_proj: gfx.camera.view_proj(gfx.aspect()).to_cols_array(),
-                viewport: [
-                    window.inner_size().width as f32 / ppp,
-                    window.inner_size().height as f32 / ppp,
-                ],
-                time,
-            }
-        };
 
         // Disjoint field borrows: shell and kernel are separate fields.
         let shell = self.shell.as_mut().unwrap();
         let kernel = &mut self.kernel;
         self.egui_ctx.begin_pass(raw_input);
-        shell.update(&self.egui_ctx, kernel, &stage);
+        shell.update(&self.egui_ctx, kernel);
         let output = self.egui_ctx.end_pass();
 
         egui_state.handle_platform_output(window, output.platform_output);

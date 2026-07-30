@@ -12,6 +12,12 @@ Entry format:
 
 ---
 
+## [2026-07-30] — Removed floating stage icons (user decision)
+### Specs
+- [[UI]] §2.8 rewritten: the dock and launcher are the app-launching surfaces; the Stage is reserved for content, not chrome. Stage/arrival descriptions updated; [[Todo]] M2 annotated.
+### Code
+- `pmos-apps/shell`: removed `stage_icons` and `StageView`; the shell no longer needs the camera transform (a projection helper returns with M4's 3D interactions).
+
 ## [2026-07-30] — Milestone 2: the 3D desktop
 ### Code
 - `pmos-kernel/gfx`: graphics engine — wgpu 29 render graph (galaxy sky pass → holo-grid floor pass → egui overlay), orbit camera with pitch/zoom clamps, WGSL shaders. The galaxy uses a rotation-only inverse view-projection: it is unreachable by construction (UI spec §1).

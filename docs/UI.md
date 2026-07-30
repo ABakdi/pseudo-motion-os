@@ -9,7 +9,7 @@ How the user interface works: the shell elements that exist, how they behave, an
 
 PMOS UI exists on two composited planes:
 
-1. **The Stage (3D plane)** — a persistent 3D space rendered behind everything: a ground plane, ambient props, physics objects, floating app icons (§2.8), and any windows the user has *pinned into space*. The stage is wrapped in a **distant galaxy**: a procedural starfield/nebula rendered at infinite depth (a fullscreen shader driven by view *rotation only*, so no amount of zooming or moving ever brings it closer — it is the unreachable horizon that gives the space its sense of scale). It drifts and twinkles slowly; it is scenery, not geometry. The stage camera has a default "desk view"; the user can orbit/zoom it (mouse drag/wheel, two-hand gestures) within clamped zoom limits, and there is always a one-action "reset view" (`Home` / double-click empty space).
+1. **The Stage (3D plane)** — a persistent 3D space rendered behind everything: a ground plane, ambient props, physics objects, and any windows the user has *pinned into space*. The stage is wrapped in a **distant galaxy**: a procedural starfield/nebula rendered at infinite depth (a fullscreen shader driven by view *rotation only*, so no amount of zooming or moving ever brings it closer — it is the unreachable horizon that gives the space its sense of scale). It drifts and twinkles slowly; it is scenery, not geometry. The stage camera has a default "desk view"; the user can orbit/zoom it (mouse drag/wheel, two-hand gestures) within clamped zoom limits, and there is always a one-action "reset view" (`Home` / double-click empty space).
 2. **The Overlay (2D plane)** — classic flat UI rendered on top: floating windows, dock, palette, notifications, cursors. This is where work happens by default; the stage is where things become spatial when it helps (presenting, arranging, playing).
 
 A window can move between planes at any time ("pin to stage" / "bring to overlay"). Because every window renders into its own texture ([[Architecture]]), this is a cheap re-parenting, not a rewrite.
@@ -25,7 +25,7 @@ The OS is entered through a deliberate, cinematic sequence:
 
 1. **Home page** — a plain HTML/CSS landing page (instant paint, zero WASM): full-viewport hero with the animated PMOS logomark over a starfield backdrop, one-line pitch, and a single **Launch** call-to-action; feature highlights below. If WebGPU is missing, the Launch button is replaced by a friendly capability notice — the landing page itself works everywhere.
 2. **Launch** — clicking Launch boots the WASM kernel (progress shown on the button itself), then runs **permission onboarding**: sequential cards for **camera** (hand gestures), **microphone** (voice), and **notifications**, each with a one-line reason and `Enable` / `Later`. Browser permission prompts fire from these explicit clicks (user-gesture requirement); anything skipped is re-requested on first relevant use. Onboarding state persists to `/sys/permissions`, so returning users go straight to the desktop.
-3. **Arrival** — a fade from the landing page into the Stage: the galaxy backdrop, the floating system app icons, and the dock. The OS is live.
+3. **Arrival** — a fade from the landing page into the Stage: the galaxy backdrop and the dock. The OS is live.
 
 **Why a landing page at all:** PMOS is also its own advertisement — the first impression is part of the product, and keeping it WASM-free means it loads instantly and degrades gracefully.
 
@@ -56,8 +56,8 @@ Toast stack top-right: app messages, AI task completions, capability consent pro
 ### 2.7 Context Menus
 Right-click / *middle-finger-pinch* opens context menus on windows, files, stage objects. Every context action also exists in the command palette (discoverability rule: **nothing is context-menu-only**).
 
-### 2.8 Floating app icons
-The system applications (Terminal, Files, Notes, Settings, Browser) live **in the Stage** as glowing, gently bobbing billboard icons arranged in the space in front of the default camera — the desktop's furniture. Hover (pointer or hand-point) brightens the icon and fades in its label; click/pinch opens the app's window in the overlay. Icons are grabbable (✊) and re-arrangeable; their placement persists per user. The dock (§2.2) mirrors the same apps for flat, fast access — the stage icons are the spatial, presentational path; the dock is the productivity path (two-plane philosophy, §1).
+### 2.8 App launching surfaces
+Apps are launched from the **dock** (§2.2) and the **launcher** (§2.3) — one flat, fast surface and one browsable surface. *Design note (2026-07-30): an earlier revision floated the system app icons inside the 3D Stage; this was removed as redundant with the dock — the Stage stays reserved for content (physics objects, pinned windows, notes graph), not chrome.*
 
 ---
 

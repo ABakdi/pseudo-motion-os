@@ -1,41 +1,9 @@
-//! The shell process (UI spec §2): desktop with floating stage icons, dock,
-//! and window management. Talks to the kernel strictly through the ABI.
+//! The shell process (UI spec §2): desktop, dock, and window management.
+//! Talks to the kernel strictly through the ABI.
 
 use crate::apps::{AppKind, AppState, ALL};
 use crate::theme;
 use pmos_abi::{KernelApi, Pid, Reply, Syscall, WinDesc, WinId};
-
-/// What the shell needs to place UI inside the 3D stage: the camera transform
-/// and viewport, provided by the platform glue each frame. This is a drawing
-/// aid, not a kernel API — apps never see it.
-pub struct StageView {
-    /// Column-major view-projection matrix.
-    pub view_proj: [f32; 16],
-    /// Viewport size in egui points.
-    pub viewport: [f32; 2],
-    /// Seconds since boot (drives the icon bobbing).
-    pub time: f32,
-}
-
-impl StageView {
-    /// Project a world position to screen points. Returns the position and a
-    /// perspective scale factor (1.0 at ~13 units — the default camera dist).
-    fn project(&self, world: [f32; 3]) -> Option<(egui::Pos2, f32)> {
-        let m = &self.view_proj;
-        let (x, y, z) = (world[0], world[1], world[2]);
-        let cx = m[0] * x + m[4] * y + m[8] * z + m[12];
-        let cy = m[1] * x + m[5] * y + m[9] * z + m[13];
-        let cw = m[3] * x + m[7] * y + m[11] * z + m[15];
-        if cw < 0.5 {
-            return None; // behind or too close to the camera
-        }
-        let ndc_x = cx / cw;
-        let ndc_y = cy / cw;
-        let px = (ndc_x + 1.0) * 0.5 * self.viewport[0];
-        let py = (1.0 - ndc_y) * 0.5 * self.viewport[1];
-        Some((egui::pos2(px, py), (13.0 / cw).clamp(0.35, 2.2)))
-    }
-}
 
 struct OpenApp {
     pid: Pid,
@@ -48,7 +16,6 @@ struct OpenApp {
 pub struct Shell {
     pid: Pid,
     open_apps: Vec<OpenApp>,
-    icon_slots: Vec<(AppKind, [f32; 3])>,
     themed: bool,
 }
 
@@ -63,20 +30,10 @@ impl Shell {
                 Pid(1)
             }
         };
-        // Floating icons on an arc between the default camera and the origin
-        // (UI spec §2.8). Angles are from the +z axis, radius 5.5, eye height.
-        let icon_slots = ALL
-            .iter()
-            .enumerate()
-            .map(|(i, kind)| {
-                let a = (i as f32 - (ALL.len() - 1) as f32 / 2.0) * 0.42;
-                (*kind, [5.5 * a.sin(), 2.1, 5.5 * a.cos()])
-            })
-            .collect();
-        Self { pid, open_apps: Vec::new(), icon_slots, themed: false }
+        Self { pid, open_apps: Vec::new(), themed: false }
     }
 
-    pub fn update(&mut self, ctx: &egui::Context, kernel: &mut dyn KernelApi, stage: &StageView) {
+    pub fn update(&mut self, ctx: &egui::Context, kernel: &mut dyn KernelApi) {
         if !self.themed {
             theme::apply(ctx);
             self.themed = true;
@@ -84,7 +41,6 @@ impl Shell {
         for ev in kernel.poll_events(self.pid) {
             log::debug!("shell event: {ev:?}");
         }
-        self.stage_icons(ctx, kernel, stage);
         self.windows(ctx, kernel);
         self.dock(ctx, kernel);
         self.help_hint(ctx);
@@ -125,74 +81,6 @@ impl Shell {
         let app = self.open_apps.remove(idx);
         let _ = kernel.syscall(app.pid, Syscall::WinClose(app.win));
         let _ = kernel.syscall(self.pid, Syscall::ProcKill(app.pid));
-    }
-
-    /// Floating app icons living in the 3D stage (UI spec §2.8): world
-    /// positions projected to the overlay each frame, so they orbit, bob and
-    /// scale exactly like stage objects.
-    fn stage_icons(&mut self, ctx: &egui::Context, kernel: &mut dyn KernelApi, stage: &StageView) {
-        let mut clicked: Option<AppKind> = None;
-        for (i, (kind, base)) in self.icon_slots.iter().enumerate() {
-            let bob = (stage.time * 0.9 + i as f32 * 1.3).sin() * 0.14;
-            let world = [base[0], base[1] + bob, base[2]];
-            let Some((pos, scale)) = stage.project(world) else { continue };
-            let size = 58.0 * scale;
-            let open = self.is_open(*kind);
-
-            egui::Area::new(egui::Id::new(("stage-icon", i)))
-                .fixed_pos(pos - egui::vec2(size / 2.0, size / 2.0))
-                .order(egui::Order::Background)
-                .show(ctx, |ui| {
-                    let (rect, resp) = ui
-                        .allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
-                    let hovered = resp.hovered();
-                    let p = ui.painter();
-                    let center = rect.center();
-                    let glow = if hovered { 0.55 } else { 0.28 };
-                    p.circle_filled(
-                        center,
-                        size * 0.52,
-                        theme::BG_RAISE.gamma_multiply(if hovered { 0.95 } else { 0.75 }),
-                    );
-                    p.circle_stroke(
-                        center,
-                        size * 0.52,
-                        egui::Stroke::new(
-                            if hovered { 2.0 } else { 1.2 },
-                            theme::ACCENT_A.gamma_multiply(glow),
-                        ),
-                    );
-                    if open {
-                        p.circle_filled(
-                            center + egui::vec2(0.0, size * 0.62),
-                            2.5,
-                            theme::ACCENT_A,
-                        );
-                    }
-                    p.text(
-                        center,
-                        egui::Align2::CENTER_CENTER,
-                        kind.icon(),
-                        egui::FontId::proportional(size * 0.52),
-                        theme::INK,
-                    );
-                    if hovered {
-                        p.text(
-                            center + egui::vec2(0.0, size * 0.78),
-                            egui::Align2::CENTER_TOP,
-                            kind.title(),
-                            egui::FontId::proportional(13.0),
-                            theme::INK,
-                        );
-                    }
-                    if resp.clicked() {
-                        clicked = Some(*kind);
-                    }
-                });
-        }
-        if let Some(kind) = clicked {
-            self.launch(kernel, kind);
-        }
     }
 
     /// Window manager v1 (UI spec §2.1): egui windows own drag/resize; the
