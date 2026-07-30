@@ -61,7 +61,10 @@ fn make_pass(
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some(label),
         layout: &bgl,
-        entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniforms.as_entire_binding() }],
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: uniforms.as_entire_binding(),
+        }],
     });
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(label),
@@ -93,7 +96,11 @@ fn make_pass(
         multiview_mask: None,
         cache: None,
     });
-    PassBits { pipeline, uniforms, bind_group }
+    PassBits {
+        pipeline,
+        uniforms,
+        bind_group,
+    }
 }
 
 impl Gfx {
@@ -103,7 +110,13 @@ impl Gfx {
         surface: wgpu::Surface<'static>,
         config: wgpu::SurfaceConfiguration,
     ) -> Self {
-        let sky = make_pass(&device, "sky", include_str!("sky.wgsl"), config.format, None);
+        let sky = make_pass(
+            &device,
+            "sky",
+            include_str!("sky.wgsl"),
+            config.format,
+            None,
+        );
         let floor = make_pass(
             &device,
             "floor",
@@ -111,8 +124,11 @@ impl Gfx {
             config.format,
             Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
         );
-        let egui_renderer =
-            egui_wgpu::Renderer::new(&device, config.format, egui_wgpu::RendererOptions::default());
+        let egui_renderer = egui_wgpu::Renderer::new(
+            &device,
+            config.format,
+            egui_wgpu::RendererOptions::default(),
+        );
         Self {
             device,
             queue,
@@ -126,8 +142,7 @@ impl Gfx {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
-        if width == 0 || height == 0 || (width, height) == (self.config.width, self.config.height)
-        {
+        if width == 0 || height == 0 || (width, height) == (self.config.width, self.config.height) {
             return;
         }
         self.config.width = width;
@@ -171,7 +186,8 @@ impl Gfx {
         self.write_pass_uniforms(&self.floor, self.camera.view_proj(aspect), time);
 
         for (id, delta) in &textures_delta.set {
-            self.egui_renderer.update_texture(&self.device, &self.queue, *id, delta);
+            self.egui_renderer
+                .update_texture(&self.device, &self.queue, *id, delta);
         }
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let screen = egui_wgpu::ScreenDescriptor {
@@ -220,7 +236,8 @@ impl Gfx {
         for id in &textures_delta.free {
             self.egui_renderer.free_texture(id);
         }
-        self.queue.submit(user_cmds.into_iter().chain([encoder.finish()]));
+        self.queue
+            .submit(user_cmds.into_iter().chain([encoder.finish()]));
         frame.present();
     }
 }

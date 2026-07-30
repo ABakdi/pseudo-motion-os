@@ -50,6 +50,43 @@ impl Kernel {
         self.gfx = Some(gfx);
     }
 
+    /// Ingest a landmark frame from the gesture worker and forward the
+    /// resulting hand state to the shell (Architecture §4.4).
+    pub fn hand_frame(&mut self, data: &[f32], hands: u32, viewport: [f32; 2], now: f64) {
+        self.input.hands.ingest(data, hands, viewport, now);
+        if let Some(pos) = self.input.hands.cursor {
+            self.input.pointer_moved(pos, pmos_abi::InputSource::Hand);
+        }
+        self.publish_hand_state();
+    }
+
+    /// Per-frame upkeep: tracking-loss timeout and shell notification.
+    pub fn tick_hands(&mut self, now: f64) {
+        let was_tracking = self.input.hands.tracking;
+        self.input.hands.tick(now);
+        if was_tracking != self.input.hands.tracking {
+            self.publish_hand_state();
+        }
+    }
+
+    pub fn set_camera_status(&mut self, enabled: bool) {
+        self.input.hands.camera_enabled = enabled;
+        self.push_event(proc::SHELL_PID, KernelEvent::CameraStatus { enabled });
+        log::info!("camera pipeline enabled: {enabled}");
+    }
+
+    fn publish_hand_state(&mut self) {
+        let h = &self.input.hands;
+        let ev = KernelEvent::HandUpdate {
+            pose: h.pose,
+            pinch: h.pinch,
+            pos: h.cursor,
+            tracking: h.tracking,
+            hands: h.hands,
+        };
+        self.push_event(proc::SHELL_PID, ev);
+    }
+
     fn push_event(&mut self, pid: Pid, ev: KernelEvent) {
         self.events.entry(pid).or_default().push(ev);
     }
@@ -96,7 +133,11 @@ impl KernelApi for Kernel {
                 self.next_win += 1;
                 self.windows.insert(
                     id,
-                    WinRecord { owner: caller, title: desc.title, size: desc.size },
+                    WinRecord {
+                        owner: caller,
+                        title: desc.title,
+                        size: desc.size,
+                    },
                 );
                 Ok(Reply::Win(id))
             }

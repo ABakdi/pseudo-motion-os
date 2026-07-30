@@ -38,7 +38,10 @@ pub struct ProcessTable {
 
 impl ProcessTable {
     pub fn new() -> Self {
-        Self { next: 1, procs: HashMap::new() }
+        Self {
+            next: 1,
+            procs: HashMap::new(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -49,7 +52,13 @@ impl ProcessTable {
         let pid = Pid(self.next);
         self.next += 1;
         log::info!("proc {pid:?} registered: {name}");
-        self.procs.insert(pid, Process { name: name.to_string(), caps });
+        self.procs.insert(
+            pid,
+            Process {
+                name: name.to_string(),
+                caps,
+            },
+        );
         pid
     }
 

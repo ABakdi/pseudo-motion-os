@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 0);
+pub const ABI_VERSION: (u16, u16) = (1, 1);
 
 // ---------- handles ----------
 
@@ -63,26 +63,49 @@ pub struct WinDesc {
 pub enum Syscall {
     // process registration (built-in apps register at open; Conjure apps
     // are registered by the App Host)
-    ProcRegister { name: String },
+    ProcRegister {
+        name: String,
+    },
     // window
     WinCreate(WinDesc),
     WinClose(WinId),
     WinSetTitle(WinId, String),
     // vfs
-    FsRead { path: String },
-    FsWrite { path: String, bytes: Vec<u8> },
-    FsList { path: String },
-    FsWatch { path: String },
+    FsRead {
+        path: String,
+    },
+    FsWrite {
+        path: String,
+        bytes: Vec<u8>,
+    },
+    FsList {
+        path: String,
+    },
+    FsWatch {
+        path: String,
+    },
     // input
-    InputSubscribe { raw_hands: bool },
+    InputSubscribe {
+        raw_hands: bool,
+    },
     // ai
-    AiPrompt { agent: AgentId, msg: String },
+    AiPrompt {
+        agent: AgentId,
+        msg: String,
+    },
     // process
-    ProcSpawnApp { conjure_doc: String },
+    ProcSpawnApp {
+        conjure_doc: String,
+    },
     ProcKill(Pid),
-    CapRequest { caps: Vec<Capability>, reason: String },
+    CapRequest {
+        caps: Vec<Capability>,
+        reason: String,
+    },
     // system
-    SysQuery { path: String },
+    SysQuery {
+        path: String,
+    },
 }
 
 // ---------- events ----------
@@ -115,16 +138,54 @@ pub enum HandPose {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum KernelEvent {
-    PointerMove { pos: [f32; 2], source: InputSource },
-    Select { pos: [f32; 2], source: InputSource },
-    HandPoseChanged { pose: HandPose, confidence: f32 },
-    Key { code: u32, pressed: bool },
+    PointerMove {
+        pos: [f32; 2],
+        source: InputSource,
+    },
+    Select {
+        pos: [f32; 2],
+        source: InputSource,
+    },
+    /// Per-frame hand state (ABI 1.1): drives the morphing cursor
+    /// (UI spec §4) and the tray indicator.
+    HandUpdate {
+        pose: HandPose,
+        /// Pinch closure 0..1 — the cursor ring tightens with this.
+        pinch: f32,
+        /// Cursor position in egui points (already control-box mapped and
+        /// One-Euro filtered). None while no hand is tracked.
+        pos: Option<[f32; 2]>,
+        tracking: bool,
+        hands: u8,
+    },
+    /// Camera pipeline availability (ABI 1.1): permission granted and the
+    /// gesture worker is live.
+    CameraStatus {
+        enabled: bool,
+    },
+    Key {
+        code: u32,
+        pressed: bool,
+    },
     WinClosed(WinId),
-    FsChanged { path: String },
-    AiChunk { agent: AgentId, text: String, done: bool },
-    CapGranted { caps: Vec<Capability> },
-    CapDenied { caps: Vec<Capability> },
-    SyscallError { code: ErrorCode, message: String },
+    FsChanged {
+        path: String,
+    },
+    AiChunk {
+        agent: AgentId,
+        text: String,
+        done: bool,
+    },
+    CapGranted {
+        caps: Vec<Capability>,
+    },
+    CapDenied {
+        caps: Vec<Capability>,
+    },
+    SyscallError {
+        code: ErrorCode,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

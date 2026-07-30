@@ -9,8 +9,12 @@ pub struct OrbitCamera {
     pub target: Vec3,
 }
 
-const DEFAULT: OrbitCamera =
-    OrbitCamera { yaw: 0.0, pitch: 0.32, dist: 13.0, target: Vec3::new(0.0, 1.2, 0.0) };
+const DEFAULT: OrbitCamera = OrbitCamera {
+    yaw: 0.0,
+    pitch: 0.32,
+    dist: 13.0,
+    target: Vec3::new(0.0, 1.2, 0.0),
+};
 const PITCH_RANGE: (f32, f32) = (0.06, 1.35);
 /// Zoom clamp — one of the guarantees that the galaxy stays unreachable.
 const DIST_RANGE: (f32, f32) = (5.0, 26.0);
