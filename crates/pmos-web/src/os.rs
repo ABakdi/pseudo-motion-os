@@ -56,6 +56,41 @@ thread_local! {
     static HAND_FRAME: RefCell<Option<(Vec<f32>, u32)>> = const { RefCell::new(None) };
     static CAMERA_STATUS: RefCell<Option<(bool, String)>> = const { RefCell::new(None) };
     static CAMERA_PIXELS: RefCell<Option<(Vec<u8>, u32, u32)>> = const { RefCell::new(None) };
+    static AI_CHUNKS: RefCell<Vec<(u32, String, bool)>> = const { RefCell::new(Vec::new()) };
+}
+
+const AI_CFG_KEY: &str = "pmos.ai.cfg";
+
+fn local_storage() -> Option<web_sys::Storage> {
+    web_sys::window().and_then(|w| w.local_storage().ok().flatten())
+}
+
+/// Execute one kernel-built LLM request via llm.js.
+fn dispatch_llm(req: &pmos_kernel::ai::LlmRequest) {
+    let Some(win) = web_sys::window() else { return };
+    let Ok(g) = js_sys::Reflect::get(&win, &JsValue::from_str("pmosLlm")) else {
+        return;
+    };
+    let Ok(f) = js_sys::Reflect::get(&g, &JsValue::from_str("request")) else {
+        return;
+    };
+    let Some(f) = f.dyn_ref::<js_sys::Function>() else {
+        return;
+    };
+    let headers: std::collections::BTreeMap<&str, &str> = req
+        .headers
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let headers_json = serde_json::to_string(&headers).unwrap_or_else(|_| "{}".into());
+    let args = js_sys::Array::of5(
+        &JsValue::from_f64(req.agent as f64),
+        &JsValue::from_str(&req.url),
+        &JsValue::from_str(&headers_json),
+        &JsValue::from_str(&req.body),
+        &JsValue::from_f64(req.kind as f64),
+    );
+    let _ = js_sys::Reflect::apply(f, &g, &args);
 }
 
 /// Called by gesture.js with `hands * 63` floats (21 landmarks × x,y,z).
@@ -69,6 +104,12 @@ pub fn pmos_hands_frame(data: Vec<f32>, hands: u32) {
 #[wasm_bindgen]
 pub fn pmos_camera_status(enabled: bool, reason: Option<String>) {
     CAMERA_STATUS.with(|s| *s.borrow_mut() = Some((enabled, reason.unwrap_or_default())));
+}
+
+/// Streamed LLM deltas from llm.js.
+#[wasm_bindgen]
+pub fn pmos_ai_chunk(agent: u32, delta: String, done: bool) {
+    AI_CHUNKS.with(|q| q.borrow_mut().push((agent, delta, done)));
 }
 
 /// Preview pixels for the Hand Tracker viewer (RGBA, mirrored). These go
@@ -134,11 +175,17 @@ struct OsApp {
 
 impl OsApp {
     fn new() -> Self {
+        let mut kernel = Kernel::new();
+        if let Some(json) = local_storage().and_then(|s| s.get_item(AI_CFG_KEY).ok().flatten()) {
+            if let Ok(cfg) = serde_json::from_str::<pmos_abi::AiProviderConfig>(&json) {
+                kernel.ai.set_config(cfg, false);
+            }
+        }
         Self {
             window: None,
             canvas: None,
             pending_gfx: Rc::new(RefCell::new(None)),
-            kernel: Kernel::new(),
+            kernel,
             shell: None,
             egui_ctx: egui::Context::default(),
             egui_state: None,
@@ -205,6 +252,24 @@ impl OsApp {
             self.kernel.hand_frame(&data, hands, viewport, now);
         }
         self.kernel.tick_hands(now);
+
+        // AI plumbing: deliver streamed chunks, dispatch queued requests,
+        // persist a changed provider config (key stays inside the kernel;
+        // localStorage persistence is a documented v1 convenience).
+        for (agent, delta, done) in AI_CHUNKS.with(|q| std::mem::take(&mut *q.borrow_mut())) {
+            self.kernel.ai_chunk(agent, delta, done);
+        }
+        for req in std::mem::take(&mut self.kernel.ai.pending) {
+            dispatch_llm(&req);
+        }
+        if self.kernel.ai.config_dirty {
+            self.kernel.ai.config_dirty = false;
+            if let (Some(cfg), Some(store)) = (&self.kernel.ai.config, local_storage()) {
+                if let Ok(json) = serde_json::to_string(cfg) {
+                    let _ = store.set_item(AI_CFG_KEY, &json);
+                }
+            }
+        }
 
         // Apply changed hands directives to the JS pipeline (exactly once
         // per generation), then upload any fresh preview pixels.
