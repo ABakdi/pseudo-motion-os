@@ -1,0 +1,121 @@
+# UI
+**Pseudo Motion OS — Specification v0.3** · part of [[Pseudo Motion OS]]
+
+How the user interface works: the shell elements that exist, how they behave, and how the user interacts with them across all input modalities. The rendering machinery behind this is specified in [[Architecture#4.1 Graphics Engine (`gfx`)]]; the gesture vocabulary in [[Hand Gestures]].
+
+---
+
+## 1. The Two Planes
+
+PMOS UI exists on two composited planes:
+
+1. **The Stage (3D plane)** — a persistent 3D room/space rendered behind everything: a ground plane, ambient props, physics objects, and any windows the user has *pinned into space*. The stage has a camera with a default "desk view"; the user can orbit/zoom it (two-hand gestures or mouse) but there is always a one-action "reset view".
+2. **The Overlay (2D plane)** — classic flat UI rendered on top: floating windows, dock, palette, notifications, cursors. This is where work happens by default; the stage is where things become spatial when it helps (presenting, arranging, playing).
+
+A window can move between planes at any time ("pin to stage" / "bring to overlay"). Because every window renders into its own texture ([[Architecture]]), this is a cheap re-parenting, not a rewrite.
+
+**Why two planes:** pure-3D desktops historically fail because reading and clicking at arbitrary angles is miserable. PMOS keeps productive work flat and effortless, and makes spatiality *optional and purposeful* — the demo magic without the usability tax.
+
+---
+
+## 2. Shell Elements
+
+### 2.1 Windows
+- Standard chrome: title, drag region, minimize / close, resize handles (all corners+edges). Minimum useful hit targets: 32 px (larger tolerance when the pointer source is a hand — see §4).
+- States: normal, minimized (to dock), maximized, **pinned-to-stage** (rendered on a quad in 3D, still fully interactive via raycast picking).
+- Focus: single focused window receives keyboard/gesture events; focus follows click/pinch; `Alt-Tab` / swipe cycles.
+- Windows are owned by processes; closing the last window of a DSL app terminates its process.
+
+### 2.2 The Dock
+Bottom-center bar: running apps (with window previews on hover/point-dwell), pinned favorites, and three system items — **Launcher**, **AI palette**, **System tray**. Auto-hides in presentation mode.
+
+### 2.3 The Launcher
+Fullscreen-overlay grid of installed apps (built-ins + saved Conjure apps from `/apps`). Opened by: dock button, `Super` key, or *open-palm hold* gesture. Type-to-filter immediately.
+
+### 2.4 The Command Palette *(the centerpiece)*
+One unified palette (`Ctrl+K` / dock / 🤙 gesture) with three interleaved modes:
+- **Command mode** — fuzzy actions ("close window", "new note", "raytrace quality high").
+- **AI mode** (prefix `>` or just speak) — natural language to the system agent: questions, app conjuring, system control. Streaming responses render inline; generated apps open on acceptance. See [[AI System]].
+- **Voice mode** — opened by the 🤙 gesture or mic button; shows live transcript, executes on end-of-utterance. The palette is *the* voice surface — voice never acts without its transcript being visible here first (trust through visibility).
+
+### 2.5 System Tray
+Top-right cluster: gesture status (camera on/off, hands detected indicator), AI agent status (provider, streaming activity), performance mode (Quality / Balanced / Battery — controls RT budget & physics rate), clock, notifications bell.
+
+### 2.6 Notifications
+Toast stack top-right: app messages, AI task completions, capability consent prompts (see §5), voice-note confirmations. Toasts are actionable (buttons) and queue into a history panel.
+
+### 2.7 Context Menus
+Right-click / *middle-finger-pinch* opens context menus on windows, files, stage objects. Every context action also exists in the command palette (discoverability rule: **nothing is context-menu-only**).
+
+---
+
+## 3. Interaction Model
+
+### 3.1 One pointer, many sources
+There is exactly **one system pointer**, fed by mouse *or* hand (*point* gesture) — whichever moved last wins, with a short hysteresis to prevent flicker. The pointer carries a source tag; UI adapts (see §4) but apps receive identical events ([[Architecture#4.4 Input Pipeline (`input`)]]).
+
+### 3.2 The modality parity rule
+Every action in the system MUST be reachable by (a) mouse/keyboard, (b) one hand, and (c) voice, unless physically nonsensical. This is the **one-hand-is-enough / no-hands-is-enough policy** from [[Pseudo Motion OS#2. Philosophy]] made testable: the spec for any new feature must list its three bindings.
+
+| Action | Mouse/KB | Hand | Voice |
+|---|---|---|---|
+| Select / click | left click | pinch | "click / select the …" |
+| Drag window | drag titlebar | pinch-hold on titlebar | "move … to the left" |
+| Grab 3D object | drag | grab (fist) | "put the cube on the table" |
+| Scroll | wheel | two-finger drag / palm tilt | "scroll down" |
+| Switch desktop | `Ctrl+←/→` | open-hand swipe | "next desktop" |
+| Launcher | `Super` | open-palm hold | "open the launcher" |
+| Palette / voice | `Ctrl+K` | 🤙 tap | (already voice) |
+| Confirm / cancel | Enter / Esc | thumbs-up / thumbs-down | "yes / cancel" |
+
+### 3.3 Text input
+Physical keyboard is primary. Voice dictation into any focused text field via palette voice mode. An on-screen keyboard is **post-v1** (gesture typing is deliberately out of scope — it is a research problem and off the demo path).
+
+### 3.4 The Stage interactions
+- **Picking:** pointer ray from camera through cursor; hover highlights; pinch/click selects.
+- **Grab physics objects:** *grab* attaches the object kinematically to the hand with a spring (so collisions still resolve); release inherits hand velocity → throwing works naturally.
+- **Two-hand:** spread/pinch scales the selected object or zooms the camera; two-fist rotate orbits it. See [[Hand Gestures#Two-hand enhancers]].
+- **Pinned windows** face the camera by default (billboard) unless the user rotates them intentionally.
+
+### 3.5 Desktops (workspaces)
+Virtual desktops each with their own overlay window set but **sharing one stage**. Swipe / `Ctrl+arrows` to switch. Presentation mode is a special desktop: dock hidden, notifications muted, gesture cursor rendered large and high-contrast for the audience.
+
+---
+
+## 4. Pointer-Source Adaptation
+
+When the active pointer source is a hand:
+- Hit targets gain a +8 px tolerance ring; small controls magnify on hover-dwell.
+- The cursor renders as an open ring that closes as pinch confidence rises (pre-touch feedback — users feel the click *coming*).
+- Dwell (800 ms) acts as hover; dwell-progress ring shown.
+- Snap: near-window-edge drags snap to halves/quarters (more aggressive snapping than with a mouse).
+
+When source is mouse: standard precise cursor, no magnification.
+
+---
+
+## 5. Consent & Safety UI
+
+Capability requests ([[Architecture#4.7 Process & Capability Manager (`proc`)]]) surface as a **consent sheet**: which app, which capability, why (the app's declared reason), Allow once / Always / Deny. AI-initiated system actions above a risk threshold (file deletion, network, closing unsaved work) show an **action preview toast** with undo where possible. Nothing AI-driven touches the filesystem destructively without either a standing grant or a visible confirmation.
+
+---
+
+## 6. Visual Design
+
+- **Theme:** dark, high-contrast default (projector-friendly for the teaching use case); light theme included; both defined as egui style tokens in one place.
+- **Depth cues:** overlay windows carry soft shadows; stage lighting is warm-neutral; the ray-traced showcase objects are the visual jewelry, not the whole room.
+- **Motion:** 150–250 ms ease-out for all shell transitions; physics provides the rest of the life. Reduced-motion setting disables nonessential animation.
+- **Feedback for gestures:** every recognized gesture flashes a small glyph near the cursor (👌, ✊, 🤙…) — instant confirmation of *what the system saw*, which is the single most important trust feature of camera input.
+
+---
+
+## 7. Accessibility
+
+- Modality parity (§3.2) is the backbone: no gesture-only or voice-only functions.
+- All egui UI is keyboard-navigable; focus outlines always visible.
+- Adjustable: gesture hold-times, dwell times, cursor size, UI scale, high-contrast mode.
+- Voice control covers the full command set (palette command grammar = voice grammar).
+
+---
+
+*Changes to this document must be recorded in [[Changelog]].*
