@@ -6,14 +6,16 @@ pub enum AppKind {
     Terminal,
     Files,
     Notes,
+    HandTracker,
     Settings,
     Browser,
 }
 
-pub const ALL: [AppKind; 5] = [
+pub const ALL: [AppKind; 6] = [
     AppKind::Terminal,
     AppKind::Files,
     AppKind::Notes,
+    AppKind::HandTracker,
     AppKind::Settings,
     AppKind::Browser,
 ];
@@ -24,6 +26,7 @@ impl AppKind {
             AppKind::Terminal => "Terminal",
             AppKind::Files => "Files",
             AppKind::Notes => "Motion Notes",
+            AppKind::HandTracker => "Hand Tracker",
             AppKind::Settings => "Settings",
             AppKind::Browser => "Browser",
         }
@@ -34,6 +37,7 @@ impl AppKind {
             AppKind::Terminal => "🖥",
             AppKind::Files => "📁",
             AppKind::Notes => "📝",
+            AppKind::HandTracker => "✋",
             AppKind::Settings => "⚙",
             AppKind::Browser => "🌐",
         }
@@ -44,6 +48,7 @@ impl AppKind {
             AppKind::Terminal => [560.0, 360.0],
             AppKind::Files => [520.0, 400.0],
             AppKind::Notes => [560.0, 420.0],
+            AppKind::HandTracker => [370.0, 560.0],
             AppKind::Settings => [460.0, 420.0],
             AppKind::Browser => [640.0, 440.0],
         }
@@ -53,6 +58,7 @@ impl AppKind {
 /// Per-window app state (the app's "process memory").
 pub struct AppState {
     pub kind: AppKind,
+    pub hand_tracker: crate::hand_tracker::HandTrackerState,
     terminal_input: String,
     terminal_log: Vec<String>,
     notes_text: String,
@@ -62,6 +68,7 @@ impl AppState {
     pub fn new(kind: AppKind) -> Self {
         Self {
             kind,
+            hand_tracker: crate::hand_tracker::HandTrackerState::new(),
             terminal_input: String::new(),
             terminal_log: vec![
                 "Pseudo Motion OS — pseudo terminal".to_string(),
@@ -102,6 +109,11 @@ impl AppState {
             AppKind::Browser => {
                 ui.label("The browser app lands in milestone 8.");
                 ui.weak("(iframe browsing in web mode, native webviews under Tauri)");
+            }
+            // Drawn by the shell (needs kernel + platform textures); this
+            // arm is a defensive fallback only.
+            AppKind::HandTracker => {
+                ui.weak("hand tracker is shell-drawn");
             }
         }
     }

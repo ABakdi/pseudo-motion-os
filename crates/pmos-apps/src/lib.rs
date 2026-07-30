@@ -7,5 +7,6 @@
 
 pub mod apps;
 pub mod cursor;
+pub mod hand_tracker;
 pub mod shell;
 pub mod theme;

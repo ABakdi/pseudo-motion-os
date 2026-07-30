@@ -18,6 +18,8 @@ pub struct Shell {
     pid: Pid,
     open_apps: Vec<OpenApp>,
     cursor: HandCursor,
+    /// Latest raw landmark frame (viewer overlay; capability-gated events).
+    raw_hands: (Vec<f32>, u8),
     themed: bool,
 }
 
@@ -29,6 +31,7 @@ impl Shell {
             Pid(0),
             Syscall::ProcRegister {
                 name: "shell".into(),
+                caps: Vec::new(),
             },
         ) {
             Ok(Reply::Pid(pid)) => pid,
@@ -41,11 +44,17 @@ impl Shell {
             pid,
             open_apps: Vec::new(),
             cursor: HandCursor::new(),
+            raw_hands: (Vec::new(), 0),
             themed: false,
         }
     }
 
-    pub fn update(&mut self, ctx: &egui::Context, kernel: &mut dyn KernelApi) {
+    pub fn update(
+        &mut self,
+        ctx: &egui::Context,
+        kernel: &mut dyn KernelApi,
+        camera_feed: Option<egui::TextureId>,
+    ) {
         if !self.themed {
             theme::apply(ctx);
             self.themed = true;
@@ -68,10 +77,14 @@ impl Shell {
                     self.cursor.hands = hands;
                 }
                 KernelEvent::CameraStatus { enabled } => self.cursor.camera_enabled = enabled,
+                KernelEvent::RawHands { data, hands } => self.raw_hands = (data, hands),
                 other => log::debug!("shell event: {other:?}"),
             }
         }
-        self.windows(ctx, kernel);
+        if !self.cursor.tracking {
+            self.raw_hands.1 = 0;
+        }
+        self.windows(ctx, kernel, camera_feed);
         self.dock(ctx, kernel);
         self.help_hint(ctx);
         self.cursor.draw(ctx);
@@ -89,10 +102,17 @@ impl Shell {
         }
         // Each app is a real kernel process: register, then open its window
         // via capability-checked syscalls (the ABI's permanent smoke test).
+        // Built-in apps that need more than the default grant get it by
+        // delegation from the shell's own capability set.
+        let caps = match kind {
+            AppKind::HandTracker => vec![pmos_abi::Capability::InputRawHands],
+            _ => Vec::new(),
+        };
         let Ok(Reply::Pid(pid)) = kernel.syscall(
             self.pid,
             Syscall::ProcRegister {
                 name: kind.title().into(),
+                caps,
             },
         ) else {
             return;
@@ -115,34 +135,73 @@ impl Shell {
     }
 
     fn close(&mut self, kernel: &mut dyn KernelApi, idx: usize) {
-        let app = self.open_apps.remove(idx);
+        let mut app = self.open_apps.remove(idx);
+        if app.state.kind == AppKind::HandTracker {
+            app.state.hand_tracker.on_close(kernel, app.pid);
+        }
         let _ = kernel.syscall(app.pid, Syscall::WinClose(app.win));
         let _ = kernel.syscall(self.pid, Syscall::ProcKill(app.pid));
     }
 
     /// Window manager v1 (UI spec §2.1): egui windows own drag/resize; the
     /// shell owns lifecycle, which flows through syscalls.
-    fn windows(&mut self, ctx: &egui::Context, kernel: &mut dyn KernelApi) {
+    fn windows(
+        &mut self,
+        ctx: &egui::Context,
+        kernel: &mut dyn KernelApi,
+        camera_feed: Option<egui::TextureId>,
+    ) {
+        // Snapshot the cursor/landmark state the Hand Tracker window needs,
+        // so the window closure doesn't re-borrow self.
+        let raw = self.raw_hands.clone();
+        let cam_on = self.cursor.camera_enabled;
+        let tracking = self.cursor.tracking;
+        let pose_label = format!("{:?}", self.cursor.pose);
+        let screen = ctx.content_rect();
+
         let mut to_close: Vec<usize> = Vec::new();
         for (i, app) in self.open_apps.iter_mut().enumerate() {
             let mut open = app.open;
-            let win = egui::Window::new(format!(
-                "{}  {}",
-                app.state.kind.icon(),
-                app.state.kind.title()
-            ))
-            .id(egui::Id::new(("app-window", app.win)))
-            .default_size(app.state.kind.default_size())
-            .resizable(true)
-            .collapsible(true)
-            .open(&mut open);
+            let kind = app.state.kind;
+            let size = kind.default_size();
+            let win = egui::Window::new(format!("{}  {}", kind.icon(), kind.title()))
+                .id(egui::Id::new(("app-window", app.win)))
+                .default_size(size)
+                .resizable(true)
+                .collapsible(true)
+                .open(&mut open);
             let win = if app.focus {
                 app.focus = false;
-                win.default_pos(egui::pos2(120.0 + i as f32 * 36.0, 90.0 + i as f32 * 30.0))
+                if kind == AppKind::HandTracker {
+                    // The viewer lives bottom-right, above the dock (spec §8).
+                    win.default_pos(egui::pos2(
+                        screen.max.x - size[0] - 18.0,
+                        (screen.max.y - size[1] - 84.0).max(10.0),
+                    ))
+                } else {
+                    win.default_pos(egui::pos2(120.0 + i as f32 * 36.0, 90.0 + i as f32 * 30.0))
+                }
             } else {
                 win
             };
-            win.show(ctx, |ui| app.state.ui(ui));
+            let pid = app.pid;
+            let state = &mut app.state;
+            win.show(ctx, |ui| {
+                if kind == AppKind::HandTracker {
+                    state.hand_tracker.ui(
+                        ui,
+                        kernel,
+                        pid,
+                        camera_feed,
+                        &raw,
+                        cam_on,
+                        tracking,
+                        &pose_label,
+                    );
+                } else {
+                    state.ui(ui);
+                }
+            });
             if !open {
                 to_close.push(i);
             }
