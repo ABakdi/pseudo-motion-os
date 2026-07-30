@@ -158,6 +158,7 @@ impl Shell {
         ctx: &egui::Context,
         kernel: &mut dyn KernelApi,
         camera_feed: Option<egui::TextureId>,
+        rt_tex: Option<egui::TextureId>,
         today: &str,
     ) {
         // Route per-app events (e.g. the terminal's assistant stream).
@@ -242,7 +243,7 @@ impl Shell {
         }
 
         self.handle_outcomes(ai_outcomes, kernel, now);
-        self.windows(ctx, kernel, camera_feed, today, now);
+        self.windows(ctx, kernel, camera_feed, rt_tex, today, now);
         self.conjure_windows(ctx, kernel, now);
         self.dock(ctx, kernel);
         self.launcher(ctx, kernel);
@@ -459,6 +460,7 @@ impl Shell {
         ctx: &egui::Context,
         kernel: &mut dyn KernelApi,
         camera_feed: Option<egui::TextureId>,
+        rt_tex: Option<egui::TextureId>,
         today: &str,
         now: f64,
     ) {
@@ -522,6 +524,10 @@ impl Shell {
                 AppKind::Files => state.files_ui(ui, kernel, pid),
                 AppKind::Notes => {
                     state.notes_ui(ui, kernel, pid, today);
+                    None
+                }
+                AppKind::RayTracer => {
+                    state.ray_tracer_ui(ui, kernel, pid, rt_tex);
                     None
                 }
                 _ => {

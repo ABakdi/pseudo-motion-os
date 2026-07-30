@@ -196,13 +196,22 @@ struct OsApp {
     camera_tex: Option<egui::TextureHandle>,
     applied_hands_generation: u32,
     last_frame_time: f64,
-    // hand-grab routing (M4): true = dragging UI, false = orbiting camera
-    hand_grab_ui: bool,
+    frame_dt: f32,
+    // hand-grab routing (M4/M7): what the closed hand is holding
+    hand_grab_mode: GrabMode,
     hand_grab_last: [f32; 2],
     // camera interaction
-    dragging: bool,
+    mouse_mode: GrabMode,
     last_cursor: Option<(f32, f32)>,
     last_press: f64,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum GrabMode {
+    None,
+    Ui,
+    Prop,
+    Orbit,
 }
 
 impl OsApp {
@@ -225,9 +234,10 @@ impl OsApp {
             camera_tex: None,
             applied_hands_generation: 0,
             last_frame_time: now_secs(),
-            hand_grab_ui: false,
+            frame_dt: 1.0 / 60.0,
+            hand_grab_mode: GrabMode::None,
             hand_grab_last: [0.0, 0.0],
-            dragging: false,
+            mouse_mode: GrabMode::None,
             last_cursor: None,
             last_press: 0.0,
         }
@@ -320,6 +330,7 @@ impl OsApp {
         // Live frame rate for /sys/fps (EMA).
         let dt = (now - self.last_frame_time).max(1e-4);
         self.last_frame_time = now;
+        self.frame_dt = dt as f32;
         let fps = 1.0 / dt;
         self.kernel.vfs.sys_fps = if self.kernel.vfs.sys_fps == 0.0 {
             fps as f32
@@ -367,6 +378,7 @@ impl OsApp {
             }
         }
         let camera_feed = self.camera_tex.as_ref().map(|t| t.id());
+        let rt_tex = self.kernel.gfx.as_mut().map(|g| g.rt_texture());
 
         let time = (now_secs() - self.boot_time) as f32;
         let mut raw_input = egui_state.take_egui_input(window);
@@ -405,10 +417,9 @@ impl OsApp {
                     });
                 }
                 HandIntent::GrabStart(pos) => {
-                    // Decide once per grab: window-drag when over UI, camera
-                    // orbit over the open stage.
+                    // Decide once per grab: UI drag, physics prop, or orbit.
                     if self.egui_ctx.is_pointer_over_egui() {
-                        self.hand_grab_ui = true;
+                        self.hand_grab_mode = GrabMode::Ui;
                         ev.push(egui::Event::PointerMoved(p(pos)));
                         ev.push(egui::Event::PointerButton {
                             pos: p(pos),
@@ -416,33 +427,42 @@ impl OsApp {
                             pressed: true,
                             modifiers: egui::Modifiers::default(),
                         });
+                    } else if self.kernel.try_grab_prop(pos, viewport) {
+                        self.hand_grab_mode = GrabMode::Prop;
                     } else {
-                        self.hand_grab_ui = false;
+                        self.hand_grab_mode = GrabMode::Orbit;
                     }
                     self.hand_grab_last = pos;
                 }
                 HandIntent::GrabMove(pos) => {
-                    if self.hand_grab_ui {
-                        ev.push(egui::Event::PointerMoved(p(pos)));
-                    } else if let Some(gfx) = self.kernel.gfx.as_mut() {
-                        let dpr = window.scale_factor() as f32;
-                        gfx.camera.orbit(
-                            (pos[0] - self.hand_grab_last[0]) * dpr,
-                            (pos[1] - self.hand_grab_last[1]) * dpr,
-                        );
+                    match self.hand_grab_mode {
+                        GrabMode::Ui => ev.push(egui::Event::PointerMoved(p(pos))),
+                        GrabMode::Prop => self.kernel.move_grab(pos, viewport),
+                        GrabMode::Orbit => {
+                            if let Some(gfx) = self.kernel.gfx.as_mut() {
+                                let dpr = window.scale_factor() as f32;
+                                gfx.camera.orbit(
+                                    (pos[0] - self.hand_grab_last[0]) * dpr,
+                                    (pos[1] - self.hand_grab_last[1]) * dpr,
+                                );
+                            }
+                        }
+                        GrabMode::None => {}
                     }
                     self.hand_grab_last = pos;
                 }
                 HandIntent::GrabEnd(pos) => {
-                    if self.hand_grab_ui {
-                        ev.push(egui::Event::PointerButton {
+                    match self.hand_grab_mode {
+                        GrabMode::Ui => ev.push(egui::Event::PointerButton {
                             pos: p(pos),
                             button: egui::PointerButton::Primary,
                             pressed: false,
                             modifiers: egui::Modifiers::default(),
-                        });
+                        }),
+                        GrabMode::Prop => self.kernel.release_grab(),
+                        _ => {}
                     }
-                    self.hand_grab_ui = false;
+                    self.hand_grab_mode = GrabMode::None;
                 }
             }
         }
@@ -456,21 +476,20 @@ impl OsApp {
             .unwrap_or_default();
         let today = today.get(..10).unwrap_or("today").to_string();
         self.egui_ctx.begin_pass(raw_input);
-        shell.update(&self.egui_ctx, kernel, camera_feed, &today);
+        shell.update(&self.egui_ctx, kernel, camera_feed, rt_tex, &today);
         let output = self.egui_ctx.end_pass();
 
         egui_state.handle_platform_output(window, output.platform_output);
         let primitives = self
             .egui_ctx
             .tessellate(output.shapes, output.pixels_per_point);
-        if let Some(gfx) = self.kernel.gfx.as_mut() {
-            gfx.render(
-                &primitives,
-                &output.textures_delta,
-                output.pixels_per_point,
-                time,
-            );
-        }
+        self.kernel.render_frame(
+            &primitives,
+            &output.textures_delta,
+            output.pixels_per_point,
+            time,
+            self.frame_dt,
+        );
     }
 }
 
@@ -557,17 +576,47 @@ impl ApplicationHandler for OsApp {
                         }
                     }
                     self.last_press = t;
-                    self.dragging = true;
+                    // Modality parity: the mouse can grab props too (UI §3.2).
+                    let ppp = self.egui_ctx.pixels_per_point();
+                    let viewport = [
+                        window.inner_size().width as f32 / ppp,
+                        window.inner_size().height as f32 / ppp,
+                    ];
+                    let pos_pts = self
+                        .last_cursor
+                        .map(|(x, y)| [x / ppp, y / ppp])
+                        .unwrap_or([0.0, 0.0]);
+                    self.mouse_mode = if self.kernel.try_grab_prop(pos_pts, viewport) {
+                        GrabMode::Prop
+                    } else {
+                        GrabMode::Orbit
+                    };
                 } else if state == ElementState::Released {
-                    self.dragging = false;
+                    if self.mouse_mode == GrabMode::Prop {
+                        self.kernel.release_grab();
+                    }
+                    self.mouse_mode = GrabMode::None;
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let pos = (position.x as f32, position.y as f32);
-                if self.dragging && !egui_wants {
-                    if let (Some(last), Some(gfx)) = (self.last_cursor, self.kernel.gfx.as_mut()) {
-                        gfx.camera.orbit(pos.0 - last.0, pos.1 - last.1);
+                match self.mouse_mode {
+                    GrabMode::Orbit if !egui_wants => {
+                        if let (Some(last), Some(gfx)) =
+                            (self.last_cursor, self.kernel.gfx.as_mut())
+                        {
+                            gfx.camera.orbit(pos.0 - last.0, pos.1 - last.1);
+                        }
                     }
+                    GrabMode::Prop => {
+                        let ppp = self.egui_ctx.pixels_per_point();
+                        let viewport = [
+                            window.inner_size().width as f32 / ppp,
+                            window.inner_size().height as f32 / ppp,
+                        ];
+                        self.kernel.move_grab([pos.0 / ppp, pos.1 / ppp], viewport);
+                    }
+                    _ => {}
                 }
                 self.last_cursor = Some(pos);
                 self.kernel

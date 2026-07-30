@@ -10,15 +10,17 @@ pub enum AppKind {
     Terminal,
     Files,
     Notes,
+    RayTracer,
     HandTracker,
     Settings,
     Browser,
 }
 
-pub const ALL: [AppKind; 6] = [
+pub const ALL: [AppKind; 7] = [
     AppKind::Terminal,
     AppKind::Files,
     AppKind::Notes,
+    AppKind::RayTracer,
     AppKind::HandTracker,
     AppKind::Settings,
     AppKind::Browser,
@@ -30,6 +32,7 @@ impl AppKind {
             AppKind::Terminal => "Terminal",
             AppKind::Files => "Files",
             AppKind::Notes => "Motion Notes",
+            AppKind::RayTracer => "Ray Tracer",
             AppKind::HandTracker => "Hand Tracker",
             AppKind::Settings => "Settings",
             AppKind::Browser => "Browser",
@@ -41,6 +44,7 @@ impl AppKind {
             AppKind::Terminal => "🖥",
             AppKind::Files => "📁",
             AppKind::Notes => "📝",
+            AppKind::RayTracer => "◇",
             AppKind::HandTracker => "✋",
             AppKind::Settings => "⚙",
             AppKind::Browser => "🌐",
@@ -52,6 +56,7 @@ impl AppKind {
             AppKind::Terminal => [560.0, 380.0],
             AppKind::Files => [480.0, 420.0],
             AppKind::Notes => [640.0, 460.0],
+            AppKind::RayTracer => [548.0, 480.0],
             AppKind::HandTracker => [370.0, 560.0],
             AppKind::Settings => [460.0, 420.0],
             AppKind::Browser => [640.0, 440.0],
@@ -77,6 +82,7 @@ impl AppKind {
                 Capability::FsRead("/notes".into()),
                 Capability::FsWrite("/notes".into()),
             ],
+            AppKind::RayTracer => vec![Capability::SysQuery],
             AppKind::HandTracker => vec![Capability::InputRawHands],
             AppKind::Settings => vec![Capability::AiPrompt],
             AppKind::Browser => Vec::new(),
@@ -107,6 +113,9 @@ pub struct AppState {
     notes_new_name: String,
     notes_status: String,
     notes_backlinks: Vec<String>,
+    // ray tracer
+    rt_bounces: u8,
+    rt_animate: bool,
     // settings
     ai_kind: u8,
     ai_base: String,
@@ -131,6 +140,8 @@ impl AppState {
             notes_new_name: String::new(),
             notes_status: String::new(),
             notes_backlinks: Vec::new(),
+            rt_bounces: 3,
+            rt_animate: true,
             ai_kind: 0,
             ai_base: String::new(),
             ai_model: "claude-sonnet-4-5".to_string(),
@@ -708,6 +719,53 @@ impl AppState {
                 });
             }
         });
+    }
+
+    // ---------------- ray tracer ----------------
+
+    /// The Whitted tracer's viewport window (Architecture §4.3): the compute
+    /// pass renders continuously; this window just shows the texture and
+    /// pushes control changes through the RtConfig syscall.
+    pub fn ray_tracer_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        kernel: &mut dyn KernelApi,
+        pid: Pid,
+        rt_tex: Option<egui::TextureId>,
+    ) {
+        match rt_tex {
+            Some(tex) => {
+                let w = ui.available_width().clamp(320.0, 512.0);
+                let size = egui::vec2(w, w * 384.0 / 512.0);
+                ui.add(
+                    egui::Image::new(egui::load::SizedTexture::new(tex, size)).corner_radius(8.0),
+                );
+            }
+            None => {
+                ui.weak("renderer starting…");
+            }
+        }
+        ui.add_space(6.0);
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.label("bounces");
+            let mut b = self.rt_bounces as u32;
+            changed |= ui.add(egui::Slider::new(&mut b, 1..=5)).changed();
+            self.rt_bounces = b as u8;
+            changed |= ui.checkbox(&mut self.rt_animate, "animate").changed();
+        });
+        ui.weak(
+            "Whitted tracing on the GPU: mirror + glass spheres, checkered floor, hard shadows",
+        );
+        if changed {
+            let _ = kernel.syscall(
+                pid,
+                Syscall::RtConfig {
+                    bounces: self.rt_bounces,
+                    animate: self.rt_animate,
+                },
+            );
+        }
     }
 
     // ---------------- settings ----------------
