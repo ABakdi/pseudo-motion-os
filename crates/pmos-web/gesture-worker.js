@@ -22,6 +22,11 @@ globalThis.importScripts = (...urls) => {
 let landmarker = null;
 let fileset = null;
 let makeLandmarker = null;
+// Builds must be strictly serialized: two concurrent createFromOptions calls
+// in one worker race and can leave the landmarker permanently broken. While
+// a build runs, the newest requested config waits its turn.
+let building = false;
+let pendingCfg = null;
 
 async function build(opts = {}) {
   const cfg = (delegate) => ({
@@ -40,7 +45,30 @@ async function build(opts = {}) {
   }
 }
 
+async function reconfigure(opts) {
+  if (building) {
+    pendingCfg = opts;
+    return;
+  }
+  building = true;
+  const old = landmarker;
+  landmarker = null;
+  old?.close?.();
+  try {
+    await build(opts);
+  } catch (err) {
+    postMessage({ type: "error", message: String(err) });
+  }
+  building = false;
+  if (pendingCfg) {
+    const next = pendingCfg;
+    pendingCfg = null;
+    reconfigure(next);
+  }
+}
+
 (async () => {
+  building = true;
   try {
     const { FilesetResolver, HandLandmarker } = await import(`${VISION}/vision_bundle.mjs`);
     fileset = await FilesetResolver.forVisionTasks(`${VISION}/wasm`);
@@ -50,19 +78,18 @@ async function build(opts = {}) {
   } catch (e) {
     postMessage({ type: "error", message: String(e) });
   }
+  building = false;
+  if (pendingCfg) {
+    const next = pendingCfg;
+    pendingCfg = null;
+    reconfigure(next);
+  }
 })();
 
 onmessage = async (e) => {
   const m = e.data;
-  if (m.type === "configure" && fileset) {
-    const old = landmarker;
-    landmarker = null;
-    old?.close?.();
-    try {
-      await build(m);
-    } catch (err) {
-      postMessage({ type: "error", message: String(err) });
-    }
+  if (m.type === "configure") {
+    if (fileset || building) reconfigure(m);
     return;
   }
   if (m.type !== "frame") {
