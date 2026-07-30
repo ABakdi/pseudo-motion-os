@@ -113,10 +113,12 @@
       .perm-dots span { width: 7px; height: 7px; border-radius: 50%; background: rgba(139,147,169,.35); }
       .perm-dots span.on { background: var(--accent-a); }
 
-      /* ============ OS root (placeholder until milestone 2) ============ */
-      #os-root { position: fixed; inset: 0; z-index: 2; display: grid; place-items: center;
-                 background: var(--bg); }
-      #os-root p { color: var(--ink-dim); letter-spacing: .18em; font-size: .85rem; }
+      /* ============ OS root ============ */
+      #os-root { position: fixed; inset: 0; z-index: 2; background: var(--bg); }
+      #os-root p { position: absolute; inset: 0; display: grid; place-items: center;
+                   color: var(--ink-dim); letter-spacing: .18em; font-size: .85rem; margin: 0; }
+      #stage { position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+               outline: none; }
 
       @media (prefers-reduced-motion: reduce) {
         .logo g, .nebula { animation: none !important; }
@@ -202,9 +204,10 @@
       </div>
     </div>
 
-    <!-- OS root: the kernel takes over here (placeholder until milestone 2) -->
+    <!-- OS root: the kernel takes over here -->
     <div id="os-root" hidden>
       <p id="boot-status">booting kernel…</p>
+      <canvas id="stage"></canvas>
     </div>
 
     <script>
@@ -293,7 +296,10 @@
           document.getElementById("perm-later").onclick = () => next(false);
         };
 
+        let booted = false;
         const boot = (perms) => {
+          if (booted) { console.warn("[pmos] boot() re-entered", new Error().stack); return; }
+          booted = true;
           localStorage.setItem(PERMS_KEY, JSON.stringify(perms));
           document.getElementById("landing").classList.add("fade-out");
           setTimeout(() => window.wasmBindings.pmos_launch(JSON.stringify(perms)), 900);

@@ -2,6 +2,11 @@
 target = "index.html"
 dist = "../../dist"
 
+[watch]
+# Watch the whole workspace — the app spans several sibling crates.
+watch = ["../../crates", "../../Cargo.toml"]
+ignore = ["../../dist", "../../target"]
+
 [serve]
 # COOP/COEP intentionally NOT set: v1 is single-threaded WASM + JS workers
 # (Architecture §8); enabling isolation would break iframe browsing later.
