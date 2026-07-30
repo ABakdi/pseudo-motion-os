@@ -12,6 +12,16 @@ Entry format:
 
 ---
 
+## [2026-07-30] — Hand Tracker app (user request)
+### Code
+- `pmos-apps/hand_tracker`: new dock app ✋ — window opens bottom-right with the mirrored camera preview, hand-skeleton overlay (bones + points per hand), privacy mode (feed toggle off = landmarks on black and the platform stops streaming pixels entirely), live pose/hand-count status, Enable-camera re-request, and detection settings (hands, MediaPipe confidences, smoothing preset, pinch enter/exit, reset).
+- ABI 1.2: `HandsViewer { open, stream_feed }`, `HandsTune(HandsTuning)`, `CameraStart` syscalls; `RawHands` event (gated on viewer-open + `InputRawHands`); **capability delegation** — `ProcRegister` now carries requested caps, honored only if the registering caller holds them itself (the shell delegates `InputRawHands` to the Hand Tracker process).
+- Kernel: hands-directives block (generation-counted platform intent), runtime-tunable pinch thresholds and smoothing presets in the recognizer; `gesture.js`/worker: mirrored 320×240 preview streaming (only while requested) and landmarker rebuild on configure.
+- Platform: preview pixels flow JS → `pmos_camera_frame` → egui texture → shell, deliberately bypassing the kernel (privacy boundary intact).
+- Verified in Chrome: window layout/controls, camera-off state, skeleton overlay + Point classification via synthetic frames, capability delegation. Debug note: occluded/hidden tabs suspend rAF so the render loop pauses — looked like a freeze during testing; expected browser behavior, harmless in real use.
+### Specs
+- [[Hand Gestures]]: new §8 documenting the app and its plumbing; [[Todo]] annotated under M3.
+
 ## [2026-07-30] — Milestone 3: hand tracking and the morphing cursor
 ### Code
 - `pmos-web/gesture.js` + `gesture-worker.js`: capture pipeline — getUserMedia on the main thread (unavailable in workers), ImageBitmap transfer to a module worker running MediaPipe tasks-vision HandLandmarker (GPU delegate, ≤2 hands), camera-paced via requestVideoFrameCallback; landmarks posted back as flat Float32Arrays into the WASM bridge (`pmos_hands_frame` / `pmos_camera_status`).

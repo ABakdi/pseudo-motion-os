@@ -98,4 +98,17 @@ First-run includes a 60-second **calibration & tutorial**: control-box fit, pinc
 
 ---
 
+## 8. The Hand Tracker app
+
+A built-in dock app (✋) — the gesture system's viewer, tuner, and debugger. Its window opens bottom-right, above the dock.
+
+- **Viewer** — the live camera preview (mirrored selfie view) with the hand skeleton overlaid (21 points + bones per hand, one accent color per hand). Two independent toggles:
+  - *Show camera feed* — off = **privacy mode**: landmarks drawn on plain black; the platform stops streaming preview pixels entirely (not merely hiding them).
+  - *Show hand landmarks* — off = clean camera preview.
+- **Status line** — live recognized pose, hand count; when the camera is off, an *Enable camera* button re-requests permission from a real user click (covers the "Later" path from onboarding).
+- **Detection settings** — hands (1–2), MediaPipe detection/tracking confidence, cursor smoothing preset (Precise/Balanced/Smooth), pinch enter/exit thresholds; reset to the spec §6 defaults. Worker-side values rebuild the landmarker; recognizer values apply instantly.
+- **Plumbing (Architecture §3/§6):** preview pixels flow platform → shell texture and **never pass through the kernel**; landmarks reach the shell as `RawHands` events gated on the viewer being open and on the `InputRawHands` capability, which the shell **delegates** to the app process at registration (ABI 1.2 delegation rule: a process may grant only capabilities it holds itself). Tuning flows back through `HandsTune` syscalls.
+
+---
+
 *Changes to this document must be recorded in [[Changelog]].*
