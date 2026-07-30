@@ -5,4 +5,6 @@
 //! Everything here talks to the kernel exclusively through `pmos-abi` —
 //! the crate graph enforces it (no `pmos-kernel` dependency).
 
+pub mod apps;
 pub mod shell;
+pub mod theme;

@@ -7,7 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-# Deliberately ONLY the ABI: built-in apps must never reach kernel internals
-# (Architecture §5) — they are permanent integration tests of the ABI.
+# Deliberately ONLY the ABI for kernel access: built-in apps must never reach
+# kernel internals (Architecture §5) — they are permanent integration tests of
+# the ABI. egui is the userland UI toolkit, not a kernel API.
 pmos-abi = { workspace = true }
+egui = { workspace = true }
 log = { workspace = true }
