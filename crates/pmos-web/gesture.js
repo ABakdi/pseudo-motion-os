@@ -10,9 +10,13 @@
   let worker = null;
   let video = null;
   let busy = false;
+  let busySince = 0;
   let running = false;
   let streamFeed = false;
   let preview = null; // lazy 2D canvas for preview downscale
+  // Worker-side config actually in effect — configure() only rebuilds the
+  // landmarker when these change (a rebuild interrupts tracking briefly).
+  let workerCfg = "2,0.5,0.5";
 
   function reasonFor(err) {
     switch (err && err.name) {
@@ -73,11 +77,16 @@
 
   async function pump() {
     if (!running) return;
+    // The preview is independent of the worker — keep it flowing always.
+    if (streamFeed && video.readyState >= 2) sendPreview();
     if (!busy && video.readyState >= 2) {
       busy = true;
+      busySince = performance.now();
       const bitmap = await createImageBitmap(video);
       worker.postMessage({ type: "frame", bitmap, ts: performance.now() }, [bitmap]);
-      if (streamFeed) sendPreview();
+    } else if (busy && performance.now() - busySince > 2000) {
+      // Watchdog: a worker reply was lost (e.g. mid-rebuild) — recover.
+      busy = false;
     }
     // Paced by the camera, not rAF: fires once per new video frame (~30 fps).
     video.requestVideoFrameCallback(() => pump());
@@ -102,7 +111,11 @@
   // Applied by the platform glue from kernel directives (ABI 1.2).
   function configure(opts) {
     streamFeed = !!opts.streamFeed;
-    if (worker && (opts.numHands || opts.detConf || opts.trackConf)) {
+    // Rebuild the landmarker ONLY when worker-side tuning really changed —
+    // viewer open/close and feed toggles must never interrupt tracking.
+    const key = [opts.numHands ?? 2, opts.detConf ?? 0.5, opts.trackConf ?? 0.5].join(",");
+    if (worker && key !== workerCfg) {
+      workerCfg = key;
       worker.postMessage({
         type: "configure",
         numHands: opts.numHands,

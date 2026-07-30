@@ -58,28 +58,39 @@ onmessage = async (e) => {
     const old = landmarker;
     landmarker = null;
     old?.close?.();
-    await build(m);
+    try {
+      await build(m);
+    } catch (err) {
+      postMessage({ type: "error", message: String(err) });
+    }
     return;
   }
-  if (m.type !== "frame" || !landmarker) {
+  if (m.type !== "frame") {
     m.bitmap?.close?.();
     return;
   }
-  let result;
+  // Contract: EVERY frame message gets a reply — the main thread's busy
+  // flag depends on it. Dropped/failed frames reply with zero hands.
+  let hands = 0;
+  let data = new Float32Array(0);
   try {
-    result = landmarker.detectForVideo(m.bitmap, m.ts);
+    if (landmarker) {
+      const result = landmarker.detectForVideo(m.bitmap, m.ts);
+      hands = result.landmarks.length;
+      data = new Float32Array(hands * 63);
+      result.landmarks.forEach((hand, h) =>
+        hand.forEach((p, i) => {
+          const o = (h * 21 + i) * 3;
+          data[o] = p.x;
+          data[o + 1] = p.y;
+          data[o + 2] = p.z;
+        })
+      );
+    }
+  } catch (err) {
+    console.warn("[pmos gesture-worker] detect failed:", err);
   } finally {
-    m.bitmap.close();
+    m.bitmap?.close?.();
   }
-  const hands = result.landmarks.length;
-  const data = new Float32Array(hands * 63);
-  result.landmarks.forEach((hand, h) =>
-    hand.forEach((p, i) => {
-      const o = (h * 21 + i) * 3;
-      data[o] = p.x;
-      data[o + 1] = p.y;
-      data[o + 2] = p.z;
-    })
-  );
   postMessage({ type: "hands", hands, data }, [data.buffer]);
 };
