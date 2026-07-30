@@ -28,6 +28,7 @@ pub fn shell_caps() -> Vec<Capability> {
         Capability::SysQuery,
         Capability::ProcSpawnApp,
         Capability::NotesRead,
+        Capability::InputRawHands,
     ]
 }
 

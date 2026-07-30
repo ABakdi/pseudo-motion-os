@@ -35,9 +35,19 @@ pub struct OneEuro {
 impl OneEuro {
     /// Defaults tuned for cursor control ("Balanced" preset, spec §6).
     pub fn cursor() -> Self {
+        Self::preset(1)
+    }
+
+    /// 0 = Precise (fast, more jitter), 1 = Balanced, 2 = Smooth (laggy calm).
+    pub fn preset(p: u8) -> Self {
+        let (min_cutoff, beta) = match p {
+            0 => (1.8, 0.03),
+            2 => (0.5, 0.003),
+            _ => (1.0, 0.007),
+        };
         Self {
-            min_cutoff: 1.0,
-            beta: 0.007,
+            min_cutoff,
+            beta,
             x: LowPass { y: None },
             dx: LowPass { y: None },
         }
@@ -117,6 +127,9 @@ pub struct HandsState {
     fy: OneEuro,
     last_seen: f64,
     last_frame: f64,
+    /// Runtime-tunable pinch thresholds (Hand Tracker app, ABI 1.2).
+    pinch_enter: f32,
+    pinch_exit: f32,
 }
 
 impl HandsState {
@@ -135,7 +148,17 @@ impl HandsState {
             fy: OneEuro::cursor(),
             last_seen: 0.0,
             last_frame: 0.0,
+            pinch_enter: PINCH_ENTER,
+            pinch_exit: PINCH_EXIT,
         }
+    }
+
+    /// Apply the recognizer-side fields of a tuning update (ABI 1.2).
+    pub fn apply_tuning(&mut self, t: &pmos_abi::HandsTuning) {
+        self.pinch_enter = t.pinch_enter.clamp(0.1, 0.5);
+        self.pinch_exit = t.pinch_exit.clamp(self.pinch_enter + 0.05, 0.9);
+        self.fx = OneEuro::preset(t.smoothing);
+        self.fy = OneEuro::preset(t.smoothing);
     }
 
     /// Ingest one worker frame. `data` holds `hands * 63` floats.
@@ -151,7 +174,7 @@ impl HandsState {
         self.tracking = true;
 
         let lm = &data[..63]; // primary hand
-        let raw_pose = classify(lm);
+        let raw_pose = classify(lm, self.pinch_enter);
 
         // Debounce: a pose becomes active after N consecutive frames.
         if raw_pose == self.candidate {
@@ -173,12 +196,13 @@ impl HandsState {
         let scale = dist(pt(lm, WRIST), pt(lm, MIDDLE_MCP)).max(1e-3);
         let pinch_d = dist(pt(lm, THUMB_TIP), pt(lm, INDEX_TIP)) / scale;
         self.pinch_latched = if self.pinch_latched {
-            pinch_d < PINCH_EXIT
+            pinch_d < self.pinch_exit
         } else {
-            pinch_d < PINCH_ENTER
+            pinch_d < self.pinch_enter
         };
-        self.pinch =
-            ((PINCH_EXIT * 1.6 - pinch_d) / (PINCH_EXIT * 1.6 - PINCH_ENTER)).clamp(0.0, 1.0);
+        self.pinch = ((self.pinch_exit * 1.6 - pinch_d)
+            / (self.pinch_exit * 1.6 - self.pinch_enter))
+            .clamp(0.0, 1.0);
 
         // Cursor: index tip for precise poses, palm centroid otherwise.
         let anchor = match self.pose {
@@ -220,7 +244,7 @@ impl Default for HandsState {
 }
 
 /// Rule-based static pose classification on landmark topology (spec §3).
-fn classify(lm: &[f32]) -> HandPose {
+fn classify(lm: &[f32], pinch_enter: f32) -> HandPose {
     let wrist = pt(lm, WRIST);
     let scale = dist(wrist, pt(lm, MIDDLE_MCP)).max(1e-3);
 
@@ -237,10 +261,10 @@ fn classify(lm: &[f32]) -> HandPose {
     let mid_pinch_d = dist(pt(lm, THUMB_TIP), pt(lm, MIDDLE_TIP)) / scale;
 
     // Priority: fingertip-touch poses beat finger-count poses.
-    if pinch_d < PINCH_ENTER {
+    if pinch_d < pinch_enter {
         return HandPose::Pinch;
     }
-    if mid_pinch_d < PINCH_ENTER && !index {
+    if mid_pinch_d < pinch_enter && !index {
         return HandPose::MiddlePinch;
     }
     match (thumb, index, middle, ring, pinky) {
@@ -304,7 +328,7 @@ mod tests {
             (INDEX_PIP, 0.0, -0.15),
             (THUMB_TIP, 0.15, 0.0),
         ]);
-        assert_eq!(classify(&lm), HandPose::Point);
+        assert_eq!(classify(&lm, PINCH_ENTER), HandPose::Point);
     }
 
     #[test]
@@ -315,13 +339,13 @@ mod tests {
             (INDEX_TIP, 0.21, -0.2),
             (INDEX_PIP, 0.1, -0.1),
         ]);
-        assert_eq!(classify(&lm), HandPose::Pinch);
+        assert_eq!(classify(&lm, PINCH_ENTER), HandPose::Pinch);
     }
 
     #[test]
     fn classifies_grab_when_all_curled() {
         let lm = hand(&[]);
-        assert_eq!(classify(&lm), HandPose::Grab);
+        assert_eq!(classify(&lm, PINCH_ENTER), HandPose::Grab);
     }
 
     #[test]

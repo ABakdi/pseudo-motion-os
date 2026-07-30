@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 1);
+pub const ABI_VERSION: (u16, u16) = (1, 2);
 
 // ---------- handles ----------
 
@@ -61,10 +61,13 @@ pub struct WinDesc {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Syscall {
-    // process registration (built-in apps register at open; Conjure apps
-    // are registered by the App Host)
+    // Process registration (built-in apps register at open; Conjure apps are
+    // registered by the App Host). `caps` requests extra capabilities beyond
+    // the minimal default — granted only by DELEGATION: each is honored iff
+    // the registering caller itself holds it (ABI 1.2).
     ProcRegister {
         name: String,
+        caps: Vec<Capability>,
     },
     // window
     WinCreate(WinDesc),
@@ -88,6 +91,22 @@ pub enum Syscall {
     InputSubscribe {
         raw_hands: bool,
     },
+    /// Start the camera pipeline (or retry after an earlier denial). Used by
+    /// the Hand Tracker app; the browser permission prompt fires from the
+    /// user's click (ABI 1.2). Requires `InputRawHands`.
+    CameraStart,
+    /// Hand-tracker viewer state. `open` gates RawHands landmark events;
+    /// `stream_feed` additionally makes the platform stream preview pixels —
+    /// directly to the shell overlay, NEVER through the kernel (Hand
+    /// Gestures spec §7). Requires `InputRawHands`.
+    HandsViewer {
+        open: bool,
+        stream_feed: bool,
+    },
+    /// Tune the gesture pipeline (ABI 1.2). Worker-side fields (num_hands,
+    /// confidences) are applied by the platform; recognizer fields
+    /// (smoothing preset, pinch thresholds) by the kernel.
+    HandsTune(HandsTuning),
     // ai
     AiPrompt {
         agent: AgentId,
@@ -106,6 +125,33 @@ pub enum Syscall {
     SysQuery {
         path: String,
     },
+}
+
+/// Gesture-pipeline tuning (Hand Gestures spec §6 defaults).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct HandsTuning {
+    pub num_hands: u8,
+    /// MediaPipe minimum detection / tracking confidence, 0..1.
+    pub det_conf: f32,
+    pub track_conf: f32,
+    /// Cursor smoothing preset: 0 = Precise, 1 = Balanced, 2 = Smooth.
+    pub smoothing: u8,
+    /// Pinch hysteresis thresholds, normalized by palm scale.
+    pub pinch_enter: f32,
+    pub pinch_exit: f32,
+}
+
+impl Default for HandsTuning {
+    fn default() -> Self {
+        Self {
+            num_hands: 2,
+            det_conf: 0.5,
+            track_conf: 0.5,
+            smoothing: 1,
+            pinch_enter: 0.35,
+            pinch_exit: 0.55,
+        }
+    }
 }
 
 // ---------- events ----------
@@ -162,6 +208,13 @@ pub enum KernelEvent {
     /// gesture worker is live.
     CameraStatus {
         enabled: bool,
+    },
+    /// Raw landmark frame (ABI 1.2): `hands × 21 × [x,y,z]` normalized camera
+    /// coordinates. Emitted only while the hand-tracker viewer is open, and
+    /// only to processes holding `InputRawHands`.
+    RawHands {
+        data: Vec<f32>,
+        hands: u8,
     },
     Key {
         code: u32,
