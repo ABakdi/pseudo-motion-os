@@ -1,0 +1,10 @@
+[build]
+target = "index.html"
+dist = "../../dist"
+
+[serve]
+# COOP/COEP intentionally NOT set: v1 is single-threaded WASM + JS workers
+# (Architecture §8); enabling isolation would break iframe browsing later.
+addresses = ["127.0.0.1"]
+port = 8080
+open = false

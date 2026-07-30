@@ -1,0 +1,12 @@
+[package]
+name = "pmos-kernel"
+description = "The pseudo kernel: graphics, physics, ray tracer, input, AI, VFS, processes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pmos-abi = { workspace = true }
+pmos-conjure = { workspace = true }
+log = { workspace = true }

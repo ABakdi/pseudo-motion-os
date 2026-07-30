@@ -1,0 +1,19 @@
+[package]
+name = "pmos-web"
+description = "Browser entry point: boots the kernel inside the page"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pmos-kernel = { workspace = true }
+pmos-platform = { workspace = true }
+pmos-apps = { workspace = true }
+log = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true }
+web-sys = { workspace = true, features = ["Window", "Document", "Element"] }
+console_log = { workspace = true }
+console_error_panic_hook = { workspace = true }

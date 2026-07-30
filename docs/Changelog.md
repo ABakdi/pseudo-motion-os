@@ -12,6 +12,16 @@ Entry format:
 
 ---
 
+## [2026-07-30] — Milestone 0: Rust workspace scaffolded; roadmap and launch-experience specs
+### Code
+- Created the cargo workspace with the six crates from Architecture §10: `pmos-abi` (syscall/event/capability types, ABI v1.0), `pmos-kernel` (Kernel root + subsystem stubs), `pmos-platform` (all web-sys interop; WebGPU boot check via `Reflect`), `pmos-apps` (userland, ABI-only by crate graph), `pmos-conjure` (validator skeleton with machine-readable errors + 3 tests), `pmos-web` (trunk entry, placeholder page).
+- Toolchain: `rust-toolchain.toml` (stable + wasm32), trunk installed (prebuilt binary; `cargo install` fails locally on libdeflate-sys). `cargo check/test` green natively and for wasm32; `trunk build` produces `dist/`.
+- Added README with dev instructions and crate map.
+### Specs
+- Added [[Todo]]: milestone roadmap M0–M8 with tasks/subtasks; M0 marked done.
+- [[UI]]: new §2.0 Boot & Launch experience (WASM-free landing page with logo + Launch CTA, permission onboarding cards for camera/mic/notifications with Enable/Later); Stage now specifies the unreachable galaxy backdrop (rotation-only parallax); new §2.8 floating app icons in the Stage; §4 expanded with the full morphing-cursor form table.
+- [[Architecture]]: boot sequence updated for the landing page + onboarding flow; permissions UX changed from purely-lazy to onboarding-with-skip (user decision).
+
 ## [2026-07-30] — Repository created
 ### Specs
 - Project moved into the `pseudo-motion-os` GitHub repository (github.com/ABakdi/pseudo-motion-os); the Obsidian vault now lives under `docs/`.

@@ -1,0 +1,13 @@
+[package]
+name = "pmos-apps"
+description = "Shell and built-in apps — reference clients of the syscall ABI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Deliberately ONLY the ABI: built-in apps must never reach kernel internals
+# (Architecture §5) — they are permanent integration tests of the ABI.
+pmos-abi = { workspace = true }
+log = { workspace = true }
