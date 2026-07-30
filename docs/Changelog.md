@@ -12,6 +12,12 @@ Entry format:
 
 ---
 
+## [2026-07-30] — Fix: gesture detection dying permanently after tuning changes (user bug report)
+### Code
+- **Root cause:** dragging a detection slider sent a `HandsTune` syscall for every intermediate value, each triggering a landmarker rebuild; concurrent async rebuilds in the worker raced (closing/clobbering each other's instances), which could leave the landmarker permanently broken — feed alive, landmarks and gestures dead until reload.
+- `pmos-apps/hand_tracker`: tuning syscalls now fire only when the pointer is released — one rebuild per adjustment, not dozens per drag.
+- `gesture-worker.js`: rebuilds are strictly serialized — while one build runs, the newest requested config queues and applies after; the initial build participates in the same lock.
+
 ## [2026-07-30] — Fix: opening the Hand Tracker froze all hand tracking (user bug report)
 ### Code
 - **Root cause:** opening the viewer sent a `configure` to the gesture worker on every directives change, which rebuilt the MediaPipe landmarker; frames arriving mid-rebuild were dropped *without a reply*, wedging the main thread's `busy` flag forever — tracking, cursor and preview all froze until a full restart.
