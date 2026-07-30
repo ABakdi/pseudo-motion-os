@@ -86,11 +86,14 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 - [x] **Motion Notes MVP** — sidebar list (recursive /notes scan), editor, save, new note, 📅 daily note, `[[wikilink]]` extraction with click-to-follow (ghost links create the note — the Obsidian idiom), backlinks panel. **Notes runs capability-scoped to `/notes` only** — the scoping model's reference user. *(Deferred: 3D graph view → M7 physics; 🤙-hold voice capture → with the speech engine.)*
 - [x] **Conjured apps persist** — every successful conjure saves `/apps/<id>.conjure`; relaunchable from Files (click), terminal (`run <id>`), across reloads.
 
-## M7 — Physics & Ray Tracer
+## M7 — Physics & Ray Tracer ✅ *(code complete; in-browser visual pass pending user run)*
 *Goal: the stage becomes alive and the showcase renderer lands.*
 
-- [ ] **rapier3d integration** — fixed-timestep world, stage props as rigid bodies, grab/throw upgraded from kinematic to physical. *(Spec: [[Architecture#4.2]])*
-- [ ] **Ray tracer** — WGSL compute Whitted tracer (spheres, planes, reflect/refract, area lights), progressive accumulation, budgeted dispatch, scene-editor window. *(Spec: [[Architecture#4.3]])*
+- [x] **rapier3d integration** — fixed 120 Hz timestep with a render-rate accumulator; 8 stage props (cubes + spheres, palette-colored) resting on a floor collider matched to the grid plane; **grab = ray-pick + damped spring force** (body stays dynamic so collisions keep resolving), release inherits velocity — throwing works; both ✊ hand-grab and mouse-drag pick props (modality parity), falling back to camera orbit on empty space. 2 native tests (settle-on-floor, ray-pick). *(Spec: [[Architecture#4.2]])*
+- [x] **Prop rendering** — depth buffer added to the render graph (sky renders behind everything, props depth-tested, floor blends over, egui on top); instanced cube/sphere meshes with per-instance position/rotation/scale/color and Blinn-lambert + rim shading.
+- [x] **Ray tracer** — Whitted WGSL compute pass (512×384 into a storage texture): mirror + glass spheres, orbiting diffuse spheres, checkered plane, point light with hard shadows, iterative reflect/refract up to 5 bounces, sky gradient; displayed live in the new **◇ Ray Tracer app** with bounce/animate controls via the `RtConfig` syscall (ABI 1.4). *(Deferred: progressive accumulation/soft shadows, scene editing beyond the controls; per-frame full trace is cheap at this size.)*
+- [ ] *(carried)* **Notes 3D graph view** — still pending; wants notes-as-bodies on the stage.
+- *Verification:* native tests green; browser run (props visible/grabbable, RT window) awaits the user — the extension disconnected during final checks.
 
 ## M8 — Polish, Browser App, Desktop & Release
 - [ ] **Browser app** — best-effort iframe browsing (browser mode). *(Spec: [[Pseudo Motion OS]] §4.8 caveats)*

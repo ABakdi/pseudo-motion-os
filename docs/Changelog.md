@@ -12,6 +12,15 @@ Entry format:
 
 ---
 
+## [2026-07-31] — Milestone 7: physics on the stage and the ray tracer
+### Code
+- `pmos-kernel/phys`: rapier3d at a fixed 120 Hz with an accumulator; 8 palette-colored cube/sphere props on a floor collider; ray-picking; grab as a critically-damped spring force on a still-dynamic body (collisions resolve mid-grab, release inherits velocity → real throwing); 2 tests.
+- `pmos-kernel/gfx`: depth buffer joins the render graph (sky → props → blended floor → egui, egui renderer rebuilt with a depth format); instanced prop pass (generated cube/UV-sphere meshes, per-instance transform+color, Blinn-lambert+rim); `screen_ray` unprojection for picking.
+- Ray tracer: Whitted WGSL compute (512×384) — mirror and glass spheres, orbiting diffuse spheres, checkered plane, hard-shadowed point light, iterative reflect/refract, sky gradient — registered as an egui texture and shown in the new ◇ Ray Tracer app with bounce/animate controls (`RtConfig`, ABI 1.4).
+- Input routing: closed-hand grab and mouse-drag now try UI → prop → camera-orbit in that order, on both modalities.
+### Specs
+- [[Todo]]: M7 code complete; notes 3D graph still carried; browser visual pass pending user run (extension disconnected during verification).
+
 ## [2026-07-31] — Milestone 6: the virtual file system and real core apps
 ### Code
 - `pmos-kernel/vfs`: kernel-resident POSIX-like tree with write-through persistence ops drained by the platform; `/sys` synthetic files (live fps EMA, abi); parent auto-creation, 4 MB file cap, empty-dir-only deletes; 3 tests. ABI 1.3 adds `FsDelete`/`FsMkdir` and `Bytes`/`Entries` replies.
