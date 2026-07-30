@@ -1,0 +1,58 @@
+{
+  "conjure": "1.0",
+  "manifest": {
+    "id": "pomodoro-timer",
+    "name": "Pomodoro Timer",
+    "icon": "🍅",
+    "description": "25-minute focus timer with task label",
+    "window": { "size": [300.0, 380.0], "resizable": false },
+    "capabilities": []
+  },
+  "state": {
+    "remaining": { "type": "number", "value": 1500 },
+    "running": { "type": "bool", "value": false },
+    "task_name": { "type": "string", "value": "" }
+  },
+  "ui": {
+    "w": "column",
+    "spacing": 12,
+    "align": "center",
+    "children": [
+      { "w": "label", "text": "🍅 Pomodoro", "size": "title" },
+      { "w": "text_input", "bind": "task_name", "placeholder": "What are you working on?" },
+      { "w": "label", "text": "${fmt.mmss(remaining)}", "size": "title" },
+      { "w": "progress", "value": "${1 - remaining / 1500}" },
+      {
+        "w": "row",
+        "spacing": 8,
+        "children": [
+          { "w": "button", "text": "${running ? 'Pause' : 'Start'}", "on_click": "start_pause" },
+          { "w": "button", "text": "Reset", "on_click": "reset" }
+        ]
+      }
+    ]
+  },
+  "handlers": {
+    "start_pause": [{ "do": "toggle", "target": "running" }],
+    "reset": [
+      { "do": "set", "target": "remaining", "value": "1500" },
+      { "do": "set", "target": "running", "value": "false" }
+    ],
+    "tick": [
+      {
+        "do": "if",
+        "cond": "${running && remaining > 0}",
+        "then": [{ "do": "inc", "target": "remaining", "by": "-1" }]
+      },
+      {
+        "do": "if",
+        "cond": "${running && remaining == 0}",
+        "then": [
+          { "do": "set", "target": "running", "value": "false" },
+          { "do": "notify", "title": "Pomodoro done! 🎉", "body": "${task_name}" }
+        ]
+      }
+    ]
+  },
+  "timers": [{ "id": "second", "every_ms": 1000, "handler": "tick", "autostart": true }]
+}
