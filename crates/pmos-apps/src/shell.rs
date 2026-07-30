@@ -2,7 +2,7 @@
 //! Talks to the kernel strictly through the ABI.
 
 use crate::app_host;
-use crate::apps::{AppKind, AppState, ALL};
+use crate::apps::{AppAction, AppKind, AppState, ALL};
 use crate::cursor::HandCursor;
 use crate::palette::{Palette, PaletteOutcome};
 use crate::theme;
@@ -131,6 +131,15 @@ impl Shell {
         let Ok(Reply::Win(win)) = kernel.syscall(pid, Syscall::WinCreate(desc)) else {
             return Err("window creation failed".into());
         };
+        // Conjured apps persist as app bundles (relaunchable from Files,
+        // the terminal `run` command, or after a reload).
+        let _ = kernel.syscall(
+            self.pid,
+            Syscall::FsWrite {
+                path: format!("/apps/{}.conjure", doc.manifest.id),
+                bytes: doc_src.as_bytes().to_vec(),
+            },
+        );
         let title = doc.manifest.name.clone();
         let icon = doc.manifest.icon.clone();
         self.conjure_apps.push(ConjureApp {
@@ -149,7 +158,16 @@ impl Shell {
         ctx: &egui::Context,
         kernel: &mut dyn KernelApi,
         camera_feed: Option<egui::TextureId>,
+        today: &str,
     ) {
+        // Route per-app events (e.g. the terminal's assistant stream).
+        for app in &mut self.open_apps {
+            for ev in kernel.poll_events(app.pid) {
+                if let KernelEvent::AiChunk { text, done, .. } = ev {
+                    app.state.on_ai_chunk(&text, done);
+                }
+            }
+        }
         if !self.themed {
             theme::apply(ctx);
             self.themed = true;
@@ -224,7 +242,7 @@ impl Shell {
         }
 
         self.handle_outcomes(ai_outcomes, kernel, now);
-        self.windows(ctx, kernel, camera_feed);
+        self.windows(ctx, kernel, camera_feed, today, now);
         self.conjure_windows(ctx, kernel, now);
         self.dock(ctx, kernel);
         self.launcher(ctx, kernel);
@@ -395,12 +413,9 @@ impl Shell {
         }
         // Each app is a real kernel process: register, then open its window
         // via capability-checked syscalls (the ABI's permanent smoke test).
-        // Built-in apps that need more than the default grant get it by
-        // delegation from the shell's own capability set.
-        let caps = match kind {
-            AppKind::HandTracker => vec![pmos_abi::Capability::InputRawHands],
-            _ => Vec::new(),
-        };
+        // Built-in apps get their extra capabilities by delegation from the
+        // shell's own set (per-app lists live next to the apps).
+        let caps = kind.caps();
         let Ok(Reply::Pid(pid)) = kernel.syscall(
             self.pid,
             Syscall::ProcRegister {
@@ -438,12 +453,16 @@ impl Shell {
 
     /// Window manager v1 (UI spec §2.1): egui windows own drag/resize; the
     /// shell owns lifecycle, which flows through syscalls.
+    #[allow(clippy::too_many_arguments)]
     fn windows(
         &mut self,
         ctx: &egui::Context,
         kernel: &mut dyn KernelApi,
         camera_feed: Option<egui::TextureId>,
+        today: &str,
+        now: f64,
     ) {
+        let mut actions: Vec<AppAction> = Vec::new();
         // Snapshot the cursor/landmark state the Hand Tracker window needs,
         // so the window closure doesn't re-borrow self.
         let raw = self.raw_hands.clone();
@@ -480,8 +499,8 @@ impl Shell {
             };
             let pid = app.pid;
             let state = &mut app.state;
-            win.show(ctx, |ui| {
-                if kind == AppKind::HandTracker {
+            let inner = win.show(ctx, |ui| match kind {
+                AppKind::HandTracker => {
                     state.hand_tracker.ui(
                         ui,
                         kernel,
@@ -493,12 +512,26 @@ impl Shell {
                         tracking,
                         &pose_label,
                     );
-                } else if kind == AppKind::Settings {
+                    None
+                }
+                AppKind::Settings => {
                     state.settings_ui(ui, kernel, pid);
-                } else {
+                    None
+                }
+                AppKind::Terminal => state.terminal_ui(ui, kernel, pid),
+                AppKind::Files => state.files_ui(ui, kernel, pid),
+                AppKind::Notes => {
+                    state.notes_ui(ui, kernel, pid, today);
+                    None
+                }
+                _ => {
                     state.ui(ui);
+                    None
                 }
             });
+            if let Some(Some(action)) = inner.and_then(|r| r.inner) {
+                actions.push(action);
+            }
             if !open {
                 to_close.push(i);
             }
