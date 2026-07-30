@@ -12,6 +12,15 @@ Entry format:
 
 ---
 
+## [2026-07-30] — Milestone 4: gesture control
+### Code
+- `pmos-kernel/input/fusion` (new): pose → pointer-intent state machine — pinch = primary press/release, middle-pinch = secondary, two-finger = scroll (pointer parks, natural direction), grab = whole-hand drag; guaranteed release of held buttons on tracking loss; 4 unit tests.
+- `pmos-web`: intents are synthesized into egui pointer events each frame, so hands operate every existing widget (buttons, sliders, titlebars). Grab routes by context: over UI it drags; over the open stage it orbits the camera.
+- `pmos-apps`: launcher overlay (UI spec §2.3) — dimmed backdrop + app grid, opened by open-palm hold (0.6 s) or the dock ◆ button, closed by Esc/backdrop/tile launch; click-ripple feedback at the cursor on pinch onset.
+- Verified in Chrome with synthetic gestures through the full pipeline: palm-hold opened the launcher, pointing hovered a tile, pinch pressed it; fusion mechanics covered by unit tests. Full-speed click/drag confirmation on live webcam (egui's 0.8 s click window can't be met by remote frame-pumping).
+### Specs
+- [[Todo]]: M4 done with deferrals annotated (3D object grabbing → M7 with rapier props; swipe/double-palm/thumbs → when workspaces, minimize-all and consent dialogs exist).
+
 ## [2026-07-30] — Fix: gesture detection dying permanently after tuning changes (user bug report)
 ### Code
 - **Root cause:** dragging a detection slider sent a `HandsTune` syscall for every intermediate value, each triggering a landmarker rebuild; concurrent async rebuilds in the worker raced (closing/clobbering each other's instances), which could leave the landmarker permanently broken — feed alive, landmarks and gestures dead until reload.

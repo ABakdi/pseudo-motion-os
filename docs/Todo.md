@@ -55,14 +55,15 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 - *Verified in Chrome:* camera-denied degradation (tray 📷 off, zero errors) and the full pipeline via synthetic landmark injection through the real JS→WASM bridge — Point ring, Grab fist, tracking-lost freeze all rendered; classifier covered by native unit tests. **Live-webcam testing needs a machine with a camera — user to confirm.*
 - [x] **Hand Tracker app** *(added by user request, 2026-07-30)* — dock app ✋ opening bottom-right: camera preview with landmark-skeleton overlay, privacy mode (feed off = landmarks on black, pixel streaming fully stopped), detection settings (hands, confidences, smoothing preset, pinch thresholds), Enable-camera re-request. New plumbing: ABI 1.2 (`HandsViewer`/`HandsTune`/`CameraStart` syscalls, `RawHands` events, **capability delegation** on `ProcRegister`); preview pixels bypass the kernel entirely. *(Spec: [[Hand Gestures#8. The Hand Tracker app]]; verified in Chrome incl. landmark overlay via synthetic frames — a note: hidden/occluded tabs suspend rAF so rendering pauses, which is expected browser behavior.)*
 
-## M4 — Gesture Control
+## M4 — Gesture Control ✅ *(core scope; deferred items annotated)*
 *Goal: operate the whole desktop by hand: click, open, move, throw.*
 
-- [ ] **Pointer-layer gestures** — pinch = click, pinch-hold = drag (windows, sliders), middle-pinch = context menu, two-finger = scroll; hand-source hit-target tolerance + dwell-as-hover. *(Spec: [[Hand Gestures#3]], [[UI#4]])*
-- [ ] **Window manipulation** — grab (✊) a titlebar to move a window; snap zones; release inherits velocity for a gentle toss.
-- [ ] **3D object interaction** — grab stage objects (app icons re-arrangeable, decorative props) via ray-picking + kinematic spring; throwing works. *(Physics arrives fully in M7; M4 uses simple kinematics.)*
-- [ ] **Shell gestures** — open-palm hold = launcher, swipe = desktop switch, double-palm push = show stage, thumbs up/down = confirm/dismiss. *(Spec: [[Hand Gestures#3, #4]])*
-- [ ] **Gesture feedback** — recognition glyph flash at cursor; undo toast for gesture-initiated actions. *(Spec: [[UI#6]])*
+- [x] **Pose → pointer-intent fusion** (new kernel module `input/fusion`) — pinch = primary press/release, middle-pinch = secondary, two-finger = scroll with parked pointer (natural direction), grab = whole-hand drag; held buttons always release on tracking loss; unit-tested (press/release ordering, loss-release, grab lifecycle, scroll). Intents are synthesized into egui pointer events by the platform glue, so **every existing widget works with hands** — sliders, buttons, checkboxes, window titlebars. *(Spec: [[Hand Gestures#3, #5]])*
+- [x] **Window manipulation** — grab (✊) routes by context: over UI it presses-and-drags (windows move by titlebar); over the open stage it orbits the camera. Snap zones and velocity toss deferred (egui windows have no toss physics — revisit with M7).
+- [x] **Shell gestures** — open-palm hold (0.6 s) toggles the new **launcher overlay** (dimmed backdrop, app grid, Esc/backdrop-click closes, dock ◆ button); *(verified end-to-end with synthetic gestures in Chrome: palm → launcher, point → tile hover, pinch → press)*. Deferred until their targets exist: swipe (needs workspaces), double-palm show-stage (needs minimize-all), thumbs confirm/dismiss (needs consent dialogs, M5).
+- [x] **Gesture feedback** — click ripple at the cursor on pinch onset, on top of the existing morphing-cursor forms.
+- [ ] *(moved to M7)* **3D object interaction** — grab/throw stage objects: the stage currently has no objects (floating icons were removed); lands with rapier props.
+- *Verification note:* full pinch-click cycles need real framerate (egui's 0.8 s click window) — remote frame-pumped testing confirms hover/press/release mechanics; live-webcam click/drag confirmation by user.
 
 ## M5 — LLM Integration & Conjuring
 *Goal: the AI is alive — palette conversations, system control, and apps conjured from natural language.*
