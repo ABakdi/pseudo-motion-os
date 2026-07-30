@@ -57,6 +57,37 @@ thread_local! {
     static CAMERA_STATUS: RefCell<Option<(bool, String)>> = const { RefCell::new(None) };
     static CAMERA_PIXELS: RefCell<Option<(Vec<u8>, u32, u32)>> = const { RefCell::new(None) };
     static AI_CHUNKS: RefCell<Vec<(u32, String, bool)>> = const { RefCell::new(Vec::new()) };
+    static VFS_LOADED: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
+    static VFS_DIRS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static VFS_READY: RefCell<Option<bool>> = const { RefCell::new(None) };
+}
+
+/// storage.js boot-load callbacks.
+#[wasm_bindgen]
+pub fn pmos_vfs_file(path: String, data: Vec<u8>) {
+    VFS_LOADED.with(|q| q.borrow_mut().push((path, data)));
+}
+
+#[wasm_bindgen]
+pub fn pmos_vfs_dir(path: String) {
+    VFS_DIRS.with(|q| q.borrow_mut().push(path));
+}
+
+#[wasm_bindgen]
+pub fn pmos_vfs_ready(ok: bool, _err: String) {
+    VFS_READY.with(|q| *q.borrow_mut() = Some(ok));
+}
+
+fn call_storage(method: &str, args: &js_sys::Array) {
+    let Some(win) = web_sys::window() else { return };
+    let Ok(g) = js_sys::Reflect::get(&win, &JsValue::from_str("pmosStorage")) else {
+        return;
+    };
+    if let Ok(f) = js_sys::Reflect::get(&g, &JsValue::from_str(method)) {
+        if let Some(f) = f.dyn_ref::<js_sys::Function>() {
+            let _ = js_sys::Reflect::apply(f, &g, args);
+        }
+    }
 }
 
 const AI_CFG_KEY: &str = "pmos.ai.cfg";
@@ -164,6 +195,7 @@ struct OsApp {
     /// Hand Tracker preview texture (pixels never touch the kernel).
     camera_tex: Option<egui::TextureHandle>,
     applied_hands_generation: u32,
+    last_frame_time: f64,
     // hand-grab routing (M4): true = dragging UI, false = orbiting camera
     hand_grab_ui: bool,
     hand_grab_last: [f32; 2],
@@ -192,6 +224,7 @@ impl OsApp {
             boot_time: now_secs(),
             camera_tex: None,
             applied_hands_generation: 0,
+            last_frame_time: now_secs(),
             hand_grab_ui: false,
             hand_grab_last: [0.0, 0.0],
             dragging: false,
@@ -209,6 +242,7 @@ impl OsApp {
                 }
             }
             log::info!("gfx online — render graph live");
+            call_storage("loadAll", &js_sys::Array::new());
         }
         let (Some(window), Some(egui_state)) = (&self.window, &mut self.egui_state) else {
             return;
@@ -252,6 +286,46 @@ impl OsApp {
             self.kernel.hand_frame(&data, hands, viewport, now);
         }
         self.kernel.tick_hands(now);
+
+        // VFS plumbing: ingest boot-loaded state, then mirror dirty ops out.
+        for dir in VFS_DIRS.with(|q| std::mem::take(&mut *q.borrow_mut())) {
+            let _ = self.kernel.vfs.mkdir(&dir);
+            self.kernel.vfs.dirty.clear(); // boot mkdirs need no re-persist
+        }
+        for (path, data) in VFS_LOADED.with(|q| std::mem::take(&mut *q.borrow_mut())) {
+            self.kernel.vfs.load(&path, data);
+        }
+        if let Some(ok) = VFS_READY.with(|q| q.borrow_mut().take()) {
+            self.kernel.vfs.ready = true;
+            log::info!("vfs ready (persistent: {ok})");
+        }
+        for op in std::mem::take(&mut self.kernel.vfs.dirty) {
+            use pmos_kernel::vfs::VfsOp;
+            match op {
+                VfsOp::Write(path, bytes) => {
+                    let arr = js_sys::Array::of2(
+                        &JsValue::from_str(&path),
+                        &js_sys::Uint8Array::from(bytes.as_slice()).into(),
+                    );
+                    call_storage("write", &arr);
+                }
+                VfsOp::Delete(path) => {
+                    call_storage("remove", &js_sys::Array::of1(&JsValue::from_str(&path)));
+                }
+                VfsOp::Mkdir(path) => {
+                    call_storage("mkdir", &js_sys::Array::of1(&JsValue::from_str(&path)));
+                }
+            }
+        }
+        // Live frame rate for /sys/fps (EMA).
+        let dt = (now - self.last_frame_time).max(1e-4);
+        self.last_frame_time = now;
+        let fps = 1.0 / dt;
+        self.kernel.vfs.sys_fps = if self.kernel.vfs.sys_fps == 0.0 {
+            fps as f32
+        } else {
+            self.kernel.vfs.sys_fps * 0.95 + fps as f32 * 0.05
+        };
 
         // AI plumbing: deliver streamed chunks, dispatch queued requests,
         // persist a changed provider config (key stays inside the kernel;
@@ -376,8 +450,13 @@ impl OsApp {
         // Disjoint field borrows: shell and kernel are separate fields.
         let shell = self.shell.as_mut().unwrap();
         let kernel = &mut self.kernel;
+        let today = js_sys::Date::new_0()
+            .to_iso_string()
+            .as_string()
+            .unwrap_or_default();
+        let today = today.get(..10).unwrap_or("today").to_string();
         self.egui_ctx.begin_pass(raw_input);
-        shell.update(&self.egui_ctx, kernel, camera_feed);
+        shell.update(&self.egui_ctx, kernel, camera_feed, &today);
         let output = self.egui_ctx.end_pass();
 
         egui_state.handle_platform_output(window, output.platform_output);
