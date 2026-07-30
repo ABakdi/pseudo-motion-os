@@ -12,6 +12,18 @@ Entry format:
 
 ---
 
+## [2026-07-31] — Milestone 6: the virtual file system and real core apps
+### Code
+- `pmos-kernel/vfs`: kernel-resident POSIX-like tree with write-through persistence ops drained by the platform; `/sys` synthetic files (live fps EMA, abi); parent auto-creation, 4 MB file cap, empty-dir-only deletes; 3 tests. ABI 1.3 adds `FsDelete`/`FsMkdir` and `Bytes`/`Entries` replies.
+- **Scoped filesystem capabilities enforced**: `FsRead(scope)`/`FsWrite(scope)` prefix-match the requested path per process; apps get per-kind delegated scopes (Notes: `/notes` only).
+- `pmos-web/storage.js`: OPFS mirror — recursive boot load into the kernel, then write/delete/mkdir write-through (main-thread async API; the spec's sync-handle worker was unnecessary at these sizes). Verified: `vfs ready (persistent: true)`.
+- Terminal rebuilt as a real syscall client: `ls·cd·cat·write·mkdir·rm·apps·run·fps·clear·about·help` plus `>` NL mode streaming the System Assistant into the log (per-app event routing added to the shell).
+- Files app: breadcrumb browser, typed icons, click-to-launch ✨ `.conjure` bundles, delete, new-folder.
+- Motion Notes MVP: /notes sidebar, editor+save, daily note, `[[wikilinks]]` with ghost-note creation, backlinks panel.
+- Conjured apps now persist to `/apps/<id>.conjure` and are relaunchable from Files, `run`, and across reloads.
+### Specs
+- [[Todo]]: M6 core done; deferred: Files drag-and-drop/context menus, notes 3D graph (M7), voice capture, IndexedDB fallback, `/sys/processes`, `/sys/ai/log`.
+
 ## [2026-07-30] — Milestone 5: LLM integration and app conjuring (core slice)
 ### Code
 - `pmos-conjure` fully implemented: strict document model, the Conjure expression language (precedence parser, templates, 20+ builtins, ternaries, safe division), interpreter with step/if/emit budgets (a runaway emit chain can neither loop nor overflow the stack), 7-stage validator emitting machine-readable errors for the repair loop; pomodoro example doc; 13 tests.

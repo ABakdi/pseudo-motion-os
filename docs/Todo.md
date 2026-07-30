@@ -77,13 +77,14 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 - [ ] **Consent sheets** — deferred: conjured apps currently receive only the default capability set (requested capabilities are ignored), so no consent surface is required yet. *(Spec: [[UI#5]])*
 - *Verified in Chrome offline:* palette open (dock ✨ — new, also specced §2.2), `demo` command → pomodoro Conjure app spawned through the full validate→syscalls→App Host path, timer live (25:00 → 24:59), Start→Pause ternary re-render, toasts/notify path in place. **Real LLM streaming needs an API key — user to confirm via Settings → AI.**
 
-## M6 — VFS & Core Apps
+## M6 — VFS & Core Apps ✅ *(core slice; deferrals annotated)*
 *Goal: real persistent files and the built-in userland.*
 
-- [ ] **OPFS VFS** — storage worker with sync access handles, POSIX-like tree, watch events, `/sys` synthetic tree; IndexedDB fallback. *(Spec: [[Architecture#4.6]])*
-- [ ] **Terminal** — command parser (`ls`, `cd`, `create-app`, `ai-log`…), NL mode (`>` prefix), the reference ABI client. *(Spec: [[Pseudo Motion OS]] §4.6 heritage, [[UI]])*
-- [ ] **File Explorer** — tree view, drag-and-drop, context menus, app-bundle launch.
-- [ ] **Motion Notes MVP** — markdown editor, wikilinks + backlink index, inbox + daily notes, 🤙-hold voice capture, 3D graph view (physics-laid-out). *(Spec: [[Notes System]])*
+- [x] **VFS** — kernel-resident POSIX-like tree persisted **write-through to OPFS** via `storage.js` (main-thread async API; the sync-access-handle worker from the spec proved unnecessary at these file sizes — spec note). Boot loads everything back (`vfs ready (persistent: true)` verified in Chrome). `/sys` synthetic (`fps` live EMA, `abi`), read-only. `FsDelete`/`FsMkdir` + `Bytes`/`Entries` replies (ABI 1.3). **Scoped fs capabilities enforced** — prefix-matched `FsRead`/`FsWrite` per process, delegated per app. 3 native tests. *(Deferred: IndexedDB fallback, `/sys/processes`, `/sys/ai/log`.)*
+- [x] **Terminal** — real command set over syscalls: `ls·cd·cat·write·mkdir·rm·apps·run·fps·clear·about·help` + `>` natural-language mode streaming from the System Assistant into the log; the reference ABI client at last. *(verified: help/session in Chrome)*
+- [x] **File Explorer** — breadcrumb browser, typed icons, ✨ `.conjure` bundles launch on click, delete, new-folder. *(Deferred: drag-and-drop, context menus.)*
+- [x] **Motion Notes MVP** — sidebar list (recursive /notes scan), editor, save, new note, 📅 daily note, `[[wikilink]]` extraction with click-to-follow (ghost links create the note — the Obsidian idiom), backlinks panel. **Notes runs capability-scoped to `/notes` only** — the scoping model's reference user. *(Deferred: 3D graph view → M7 physics; 🤙-hold voice capture → with the speech engine.)*
+- [x] **Conjured apps persist** — every successful conjure saves `/apps/<id>.conjure`; relaunchable from Files (click), terminal (`run <id>`), across reloads.
 
 ## M7 — Physics & Ray Tracer
 *Goal: the stage becomes alive and the showcase renderer lands.*
