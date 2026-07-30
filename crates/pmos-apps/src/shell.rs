@@ -76,7 +76,10 @@ impl Shell {
                     self.cursor.tracking = tracking;
                     self.cursor.hands = hands;
                 }
-                KernelEvent::CameraStatus { enabled } => self.cursor.camera_enabled = enabled,
+                KernelEvent::CameraStatus { enabled, reason } => {
+                    self.cursor.camera_enabled = enabled;
+                    self.cursor.camera_reason = reason;
+                }
                 KernelEvent::RawHands { data, hands } => self.raw_hands = (data, hands),
                 other => log::debug!("shell event: {other:?}"),
             }
@@ -155,6 +158,7 @@ impl Shell {
         // so the window closure doesn't re-borrow self.
         let raw = self.raw_hands.clone();
         let cam_on = self.cursor.camera_enabled;
+        let cam_reason = self.cursor.camera_reason.clone();
         let tracking = self.cursor.tracking;
         let pose_label = format!("{:?}", self.cursor.pose);
         let screen = ctx.content_rect();
@@ -195,6 +199,7 @@ impl Shell {
                         camera_feed,
                         &raw,
                         cam_on,
+                        &cam_reason,
                         tracking,
                         &pose_label,
                     );

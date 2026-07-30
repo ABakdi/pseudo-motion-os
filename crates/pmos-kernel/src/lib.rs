@@ -107,10 +107,13 @@ impl Kernel {
         }
     }
 
-    pub fn set_camera_status(&mut self, enabled: bool) {
+    pub fn set_camera_status(&mut self, enabled: bool, reason: String) {
         self.input.hands.camera_enabled = enabled;
-        self.push_event(proc::SHELL_PID, KernelEvent::CameraStatus { enabled });
-        log::info!("camera pipeline enabled: {enabled}");
+        log::info!("camera pipeline enabled: {enabled} ({reason})");
+        self.push_event(
+            proc::SHELL_PID,
+            KernelEvent::CameraStatus { enabled, reason },
+        );
     }
 
     fn publish_hand_state(&mut self) {

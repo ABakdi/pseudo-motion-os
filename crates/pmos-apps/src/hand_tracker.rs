@@ -74,6 +74,7 @@ impl HandTrackerState {
         feed: Option<egui::TextureId>,
         raw: &(Vec<f32>, u8),
         camera_enabled: bool,
+        camera_reason: &str,
         tracking: bool,
         pose_label: &str,
     ) {
@@ -183,6 +184,14 @@ impl HandTrackerState {
                 ui.weak("status: on · no hands in view");
             }
         });
+        if !camera_enabled && !camera_reason.is_empty() {
+            ui.add_space(2.0);
+            ui.label(
+                egui::RichText::new(camera_reason)
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(0xff, 0x9d, 0x6b)),
+            );
+        }
 
         ui.add_space(4.0);
         ui.separator();

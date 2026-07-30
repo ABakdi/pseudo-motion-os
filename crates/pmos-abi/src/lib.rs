@@ -204,10 +204,12 @@ pub enum KernelEvent {
         tracking: bool,
         hands: u8,
     },
-    /// Camera pipeline availability (ABI 1.1): permission granted and the
-    /// gesture worker is live.
+    /// Camera pipeline availability (ABI 1.1; reason added in 1.2): when
+    /// disabled, `reason` explains why (permission denied, no device, loader
+    /// failure) so the UI can guide the user. Empty = no detail.
     CameraStatus {
         enabled: bool,
+        reason: String,
     },
     /// Raw landmark frame (ABI 1.2): `hands × 21 × [x,y,z]` normalized camera
     /// coordinates. Emitted only while the hand-tracker viewer is open, and

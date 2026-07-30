@@ -54,7 +54,7 @@ fn now_secs() -> f64 {
 
 thread_local! {
     static HAND_FRAME: RefCell<Option<(Vec<f32>, u32)>> = const { RefCell::new(None) };
-    static CAMERA_STATUS: RefCell<Option<bool>> = const { RefCell::new(None) };
+    static CAMERA_STATUS: RefCell<Option<(bool, String)>> = const { RefCell::new(None) };
     static CAMERA_PIXELS: RefCell<Option<(Vec<u8>, u32, u32)>> = const { RefCell::new(None) };
 }
 
@@ -64,10 +64,11 @@ pub fn pmos_hands_frame(data: Vec<f32>, hands: u32) {
     HAND_FRAME.with(|f| *f.borrow_mut() = Some((data, hands)));
 }
 
-/// Called by gesture.js when the camera pipeline comes up or fails.
+/// Called by gesture.js when the camera pipeline comes up, fails, or is
+/// starting; `reason` explains disabled states to the user.
 #[wasm_bindgen]
-pub fn pmos_camera_status(enabled: bool) {
-    CAMERA_STATUS.with(|s| *s.borrow_mut() = Some(enabled));
+pub fn pmos_camera_status(enabled: bool, reason: Option<String>) {
+    CAMERA_STATUS.with(|s| *s.borrow_mut() = Some((enabled, reason.unwrap_or_default())));
 }
 
 /// Preview pixels for the Hand Tracker viewer (RGBA, mirrored). These go
@@ -192,8 +193,8 @@ impl OsApp {
             window.inner_size().width as f32 / ppp,
             window.inner_size().height as f32 / ppp,
         ];
-        if let Some(enabled) = CAMERA_STATUS.with(|s| s.borrow_mut().take()) {
-            self.kernel.set_camera_status(enabled);
+        if let Some((enabled, reason)) = CAMERA_STATUS.with(|s| s.borrow_mut().take()) {
+            self.kernel.set_camera_status(enabled, reason);
         }
         if let Some((data, hands)) = HAND_FRAME.with(|f| f.borrow_mut().take()) {
             self.kernel.hand_frame(&data, hands, viewport, now);

@@ -12,6 +12,7 @@ pub struct HandCursor {
     pub tracking: bool,
     pub hands: u8,
     pub camera_enabled: bool,
+    pub camera_reason: String,
 }
 
 impl HandCursor {
@@ -23,6 +24,7 @@ impl HandCursor {
             tracking: false,
             hands: 0,
             camera_enabled: false,
+            camera_reason: String::new(),
         }
     }
 
