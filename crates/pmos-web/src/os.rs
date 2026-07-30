@@ -123,6 +123,9 @@ struct OsApp {
     /// Hand Tracker preview texture (pixels never touch the kernel).
     camera_tex: Option<egui::TextureHandle>,
     applied_hands_generation: u32,
+    // hand-grab routing (M4): true = dragging UI, false = orbiting camera
+    hand_grab_ui: bool,
+    hand_grab_last: [f32; 2],
     // camera interaction
     dragging: bool,
     last_cursor: Option<(f32, f32)>,
@@ -142,6 +145,8 @@ impl OsApp {
             boot_time: now_secs(),
             camera_tex: None,
             applied_hands_generation: 0,
+            hand_grab_ui: false,
+            hand_grab_last: [0.0, 0.0],
             dragging: false,
             last_cursor: None,
             last_press: 0.0,
@@ -225,7 +230,83 @@ impl OsApp {
         let camera_feed = self.camera_tex.as_ref().map(|t| t.id());
 
         let time = (now_secs() - self.boot_time) as f32;
-        let raw_input = egui_state.take_egui_input(window);
+        let mut raw_input = egui_state.take_egui_input(window);
+
+        // Hand pointer intents → synthetic egui pointer events (M4). Grab is
+        // routed by context: over UI it drags like a primary press (windows
+        // move by titlebar); over empty stage it orbits the camera.
+        use pmos_kernel::input::fusion::HandIntent;
+        for intent in self.kernel.input.fusion.take_intents() {
+            let ev = &mut raw_input.events;
+            let p = |xy: [f32; 2]| egui::pos2(xy[0], xy[1]);
+            match intent {
+                HandIntent::Move(pos) => ev.push(egui::Event::PointerMoved(p(pos))),
+                HandIntent::Press { pos, secondary } | HandIntent::Release { pos, secondary } => {
+                    let pressed = matches!(intent, HandIntent::Press { .. });
+                    ev.push(egui::Event::PointerMoved(p(pos)));
+                    ev.push(egui::Event::PointerButton {
+                        pos: p(pos),
+                        button: if secondary {
+                            egui::PointerButton::Secondary
+                        } else {
+                            egui::PointerButton::Primary
+                        },
+                        pressed,
+                        modifiers: egui::Modifiers::default(),
+                    });
+                }
+                HandIntent::Scroll { pos, dy } => {
+                    ev.push(egui::Event::PointerMoved(p(pos)));
+                    // Natural scrolling: hand moves down → content moves down.
+                    ev.push(egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, dy * 2.0),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: egui::Modifiers::default(),
+                    });
+                }
+                HandIntent::GrabStart(pos) => {
+                    // Decide once per grab: window-drag when over UI, camera
+                    // orbit over the open stage.
+                    if self.egui_ctx.is_pointer_over_egui() {
+                        self.hand_grab_ui = true;
+                        ev.push(egui::Event::PointerMoved(p(pos)));
+                        ev.push(egui::Event::PointerButton {
+                            pos: p(pos),
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::default(),
+                        });
+                    } else {
+                        self.hand_grab_ui = false;
+                    }
+                    self.hand_grab_last = pos;
+                }
+                HandIntent::GrabMove(pos) => {
+                    if self.hand_grab_ui {
+                        ev.push(egui::Event::PointerMoved(p(pos)));
+                    } else if let Some(gfx) = self.kernel.gfx.as_mut() {
+                        let dpr = window.scale_factor() as f32;
+                        gfx.camera.orbit(
+                            (pos[0] - self.hand_grab_last[0]) * dpr,
+                            (pos[1] - self.hand_grab_last[1]) * dpr,
+                        );
+                    }
+                    self.hand_grab_last = pos;
+                }
+                HandIntent::GrabEnd(pos) => {
+                    if self.hand_grab_ui {
+                        ev.push(egui::Event::PointerButton {
+                            pos: p(pos),
+                            button: egui::PointerButton::Primary,
+                            pressed: false,
+                            modifiers: egui::Modifiers::default(),
+                        });
+                    }
+                    self.hand_grab_ui = false;
+                }
+            }
+        }
 
         // Disjoint field borrows: shell and kernel are separate fields.
         let shell = self.shell.as_mut().unwrap();
