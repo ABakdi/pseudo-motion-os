@@ -11,5 +11,7 @@ repository.workspace = true
 # kernel internals (Architecture §5) — they are permanent integration tests of
 # the ABI. egui is the userland UI toolkit, not a kernel API.
 pmos-abi = { workspace = true }
+pmos-conjure = { workspace = true }
+serde_json = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }

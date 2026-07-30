@@ -1,10 +1,13 @@
 //! The shell process (UI spec §2): desktop, dock, and window management.
 //! Talks to the kernel strictly through the ABI.
 
+use crate::app_host;
 use crate::apps::{AppKind, AppState, ALL};
 use crate::cursor::HandCursor;
+use crate::palette::{Palette, PaletteOutcome};
 use crate::theme;
 use pmos_abi::{KernelApi, KernelEvent, Pid, Reply, Syscall, WinDesc, WinId};
+use pmos_conjure::{AppInstance, Effect};
 
 struct OpenApp {
     pid: Pid,
@@ -12,6 +15,16 @@ struct OpenApp {
     state: AppState,
     open: bool,
     focus: bool,
+}
+
+/// A conjured (AI-generated) app running in the App Host.
+struct ConjureApp {
+    pid: Pid,
+    win: WinId,
+    app: AppInstance,
+    title: String,
+    icon: String,
+    open: bool,
 }
 
 pub struct Shell {
@@ -24,6 +37,11 @@ pub struct Shell {
     launcher_open: bool,
     palm_since: Option<f64>,
     palm_fired: bool,
+    /// The command palette (UI spec §2.4).
+    palette: Palette,
+    call_since: Option<f64>,
+    conjure_apps: Vec<ConjureApp>,
+    toasts: Vec<(String, f64)>,
     themed: bool,
 }
 
@@ -52,8 +70,78 @@ impl Shell {
             launcher_open: false,
             palm_since: None,
             palm_fired: false,
+            palette: Palette::new(),
+            call_since: None,
+            conjure_apps: Vec::new(),
+            toasts: Vec::new(),
             themed: false,
         }
+    }
+
+    fn toast(&mut self, text: String, now: f64) {
+        self.toasts.push((text, now + 5.0));
+    }
+
+    fn handle_outcomes(
+        &mut self,
+        outcomes: Vec<PaletteOutcome>,
+        kernel: &mut dyn KernelApi,
+        now: f64,
+    ) {
+        for outcome in outcomes {
+            match outcome {
+                PaletteOutcome::Launch(kind) => self.launch(kernel, kind),
+                PaletteOutcome::OpenLauncher => self.launcher_open = true,
+                PaletteOutcome::Prompt(agent, msg) => {
+                    let _ = kernel.syscall(self.pid, Syscall::AiPrompt { agent, msg });
+                }
+                PaletteOutcome::SpawnConjure(doc) => {
+                    if let Err(e) = self.spawn_conjure(kernel, &doc, now) {
+                        self.toast(format!("⚠ couldn't spawn app: {e}"), now);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Spawn a validated Conjure document as a real process + App Host window
+    /// (Architecture §3.3 — the ABI's ProcSpawnApp path).
+    fn spawn_conjure(
+        &mut self,
+        kernel: &mut dyn KernelApi,
+        doc_src: &str,
+        now: f64,
+    ) -> Result<(), String> {
+        let doc = pmos_conjure::validate(doc_src)
+            .map_err(|e| e.first().map(|x| x.message.clone()).unwrap_or_default())?;
+        let Ok(Reply::Pid(pid)) = kernel.syscall(
+            self.pid,
+            Syscall::ProcRegister {
+                name: doc.manifest.name.clone(),
+                caps: Vec::new(),
+            },
+        ) else {
+            return Err("process registration failed".into());
+        };
+        let desc = WinDesc {
+            title: doc.manifest.name.clone(),
+            size: doc.manifest.window.size,
+            resizable: doc.manifest.window.resizable,
+        };
+        let Ok(Reply::Win(win)) = kernel.syscall(pid, Syscall::WinCreate(desc)) else {
+            return Err("window creation failed".into());
+        };
+        let title = doc.manifest.name.clone();
+        let icon = doc.manifest.icon.clone();
+        self.conjure_apps.push(ConjureApp {
+            pid,
+            win,
+            app: AppInstance::new(doc, now * 1000.0),
+            title,
+            icon,
+            open: true,
+        });
+        Ok(())
     }
 
     pub fn update(
@@ -67,6 +155,7 @@ impl Shell {
             self.themed = true;
         }
         let now = ctx.input(|i| i.time);
+        let mut ai_outcomes: Vec<PaletteOutcome> = Vec::new();
         for ev in kernel.poll_events(self.pid) {
             match ev {
                 KernelEvent::HandUpdate {
@@ -95,6 +184,10 @@ impl Shell {
                     self.cursor.camera_reason = reason;
                 }
                 KernelEvent::RawHands { data, hands } => self.raw_hands = (data, hands),
+                KernelEvent::AiChunk { agent, text, done } => {
+                    let outcomes = self.palette.on_chunk(agent, &text, done);
+                    ai_outcomes.extend(outcomes);
+                }
                 other => log::debug!("shell event: {other:?}"),
             }
         }
@@ -117,11 +210,98 @@ impl Shell {
             self.launcher_open = false;
         }
 
+        // 🤙 tap toggles the palette (Hand Gestures spec G8: tap < 0.5 s).
+        if self.cursor.tracking && self.cursor.pose == pmos_abi::HandPose::CallSign {
+            self.call_since.get_or_insert(now);
+        } else if let Some(since) = self.call_since.take() {
+            if now - since < 0.5 {
+                self.palette.toggle();
+            }
+        }
+        // Ctrl+K.
+        if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command) {
+            self.palette.toggle();
+        }
+
+        self.handle_outcomes(ai_outcomes, kernel, now);
         self.windows(ctx, kernel, camera_feed);
+        self.conjure_windows(ctx, kernel, now);
         self.dock(ctx, kernel);
         self.launcher(ctx, kernel);
+        let palette_outcomes = self.palette.ui(ctx);
+        self.handle_outcomes(palette_outcomes, kernel, now);
+        self.draw_toasts(ctx, now);
         self.help_hint(ctx);
         self.cursor.draw(ctx);
+    }
+
+    /// Windows of conjured apps, rendered through the App Host.
+    fn conjure_windows(&mut self, ctx: &egui::Context, kernel: &mut dyn KernelApi, now: f64) {
+        let mut closed: Vec<usize> = Vec::new();
+        let mut effects: Vec<(usize, Vec<Effect>)> = Vec::new();
+        for (i, capp) in self.conjure_apps.iter_mut().enumerate() {
+            let mut open = capp.open;
+            let win = egui::Window::new(format!("{}  {}", capp.icon, capp.title))
+                .id(egui::Id::new(("conjure-window", capp.win)))
+                .default_size(capp.app.doc.manifest.window.size)
+                .resizable(capp.app.doc.manifest.window.resizable)
+                .collapsible(true)
+                .open(&mut open);
+            let app = &mut capp.app;
+            let result = win.show(ctx, |ui| app_host::ui(app, ui, now * 1000.0));
+            if let Some(inner) = result.and_then(|r| r.inner) {
+                if !inner.is_empty() {
+                    effects.push((i, inner));
+                }
+            }
+            capp.open = open;
+            if !open {
+                closed.push(i);
+            }
+        }
+        for (i, effs) in effects {
+            for eff in effs {
+                match eff {
+                    Effect::Notify { title, body } => {
+                        let text = if body.is_empty() {
+                            format!("🔔 {title}")
+                        } else {
+                            format!("🔔 {title} — {body}")
+                        };
+                        self.toast(text, now);
+                    }
+                    Effect::SetTitle(t) => self.conjure_apps[i].title = t,
+                    Effect::CloseWindow => self.conjure_apps[i].open = false,
+                }
+            }
+        }
+        for i in (0..self.conjure_apps.len()).rev() {
+            if !self.conjure_apps[i].open {
+                let capp = self.conjure_apps.remove(i);
+                let _ = kernel.syscall(capp.pid, Syscall::WinClose(capp.win));
+                let _ = kernel.syscall(self.pid, Syscall::ProcKill(capp.pid));
+            }
+        }
+    }
+
+    fn draw_toasts(&mut self, ctx: &egui::Context, now: f64) {
+        self.toasts.retain(|(_, until)| *until > now);
+        if self.toasts.is_empty() {
+            return;
+        }
+        egui::Area::new(egui::Id::new("toasts"))
+            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-14.0, -70.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                for (text, _) in self.toasts.iter().rev().take(4) {
+                    egui::Frame::window(ui.style())
+                        .corner_radius(egui::CornerRadius::same(10))
+                        .inner_margin(egui::Margin::symmetric(12, 8))
+                        .show(ui, |ui| {
+                            ui.label(text);
+                        });
+                }
+            });
     }
 
     /// The launcher overlay (UI spec §2.3): a dimmed layer with the app grid.
@@ -313,6 +493,8 @@ impl Shell {
                         tracking,
                         &pose_label,
                     );
+                } else if kind == AppKind::Settings {
+                    state.settings_ui(ui, kernel, pid);
                 } else {
                     state.ui(ui);
                 }
@@ -346,6 +528,15 @@ impl Shell {
                                 .on_hover_text("Launcher (open palm)");
                             if launcher_btn.clicked() {
                                 self.launcher_open = !self.launcher_open;
+                            }
+                            let palette_btn = ui
+                                .add(
+                                    egui::Button::new(egui::RichText::new("✨").size(22.0))
+                                        .frame(false),
+                                )
+                                .on_hover_text("AI palette (Ctrl+K · 🤙 tap)");
+                            if palette_btn.clicked() {
+                                self.palette.toggle();
                             }
                             ui.separator();
                             for kind in ALL {
