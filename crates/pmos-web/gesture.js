@@ -14,16 +14,37 @@
   let streamFeed = false;
   let preview = null; // lazy 2D canvas for preview downscale
 
+  function reasonFor(err) {
+    switch (err && err.name) {
+      case "NotAllowedError":
+        return "camera permission is blocked — click the camera/padlock icon in the address bar, allow camera access, then press Enable again";
+      case "NotFoundError":
+        return "no camera device was found on this machine";
+      case "NotReadableError":
+        return "the camera is in use by another application";
+      default:
+        return "camera error: " + ((err && err.message) || String(err));
+    }
+  }
+
   async function start() {
     if (running) return;
     try {
+      window.wasmBindings?.pmos_camera_status(false, "requesting camera…");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 480, facingMode: "user" },
       });
+      window.wasmBindings?.pmos_camera_status(false, "camera on — loading hand tracking model…");
       video = document.createElement("video");
-      video.srcObject = stream;
       video.muted = true;
       video.playsInline = true;
+      video.setAttribute("playsinline", "");
+      // Must live in the document — some browsers reject play() on detached
+      // elements. Invisible, but never display:none (that stalls frames).
+      video.style.cssText =
+        "position:fixed;right:0;bottom:0;width:2px;height:2px;opacity:0;pointer-events:none;";
+      document.body.appendChild(video);
+      video.srcObject = stream;
       await video.play();
 
       worker = new Worker("gesture-worker.js", { type: "module" });
@@ -38,12 +59,15 @@
           window.wasmBindings.pmos_hands_frame(m.data, m.hands);
         } else if (m.type === "error") {
           console.error("[pmos gestures] worker:", m.message);
-          window.wasmBindings.pmos_camera_status(false);
+          window.wasmBindings.pmos_camera_status(
+            false,
+            "hand-tracking model failed to load (network needed on first run): " + m.message
+          );
         }
       };
     } catch (err) {
       console.warn("[pmos gestures] camera unavailable:", err);
-      window.wasmBindings?.pmos_camera_status(false);
+      window.wasmBindings?.pmos_camera_status(false, reasonFor(err));
     }
   }
 
