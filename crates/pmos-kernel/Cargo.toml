@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 pmos-abi = { workspace = true }
 pmos-conjure = { workspace = true }
+serde_json = { workspace = true }
 log = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }

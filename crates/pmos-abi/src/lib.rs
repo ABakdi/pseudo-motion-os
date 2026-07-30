@@ -25,6 +25,10 @@ pub struct TextureHandle(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AgentId(pub u32);
 
+/// Built-in agents (AI System spec §1).
+pub const AGENT_ASSISTANT: AgentId = AgentId(1);
+pub const AGENT_APP_SMITH: AgentId = AgentId(2);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BodyId(pub u32);
 
@@ -112,6 +116,9 @@ pub enum Syscall {
         agent: AgentId,
         msg: String,
     },
+    /// Set the LLM provider profile (AI System spec §2). The key is stored
+    /// kernel-side and is never readable back through any syscall.
+    AiConfigure(AiProviderConfig),
     // process
     ProcSpawnApp {
         conjure_doc: String,
@@ -152,6 +159,18 @@ impl Default for HandsTuning {
             pinch_exit: 0.55,
         }
     }
+}
+
+/// LLM provider profile (AI System spec §2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AiProviderConfig {
+    /// 0 = Anthropic (direct browser), 1 = OpenAI-compatible (incl. local
+    /// servers like Ollama / LM Studio).
+    pub kind: u8,
+    /// Empty = provider default endpoint.
+    pub base_url: String,
+    pub model: String,
+    pub api_key: String,
 }
 
 // ---------- events ----------

@@ -5,6 +5,7 @@
 //! all platform access goes through `pmos-platform` (Architecture §3); wgpu
 //! is allowed (it is itself a platform abstraction).
 
+pub mod ai;
 pub mod gfx;
 pub mod input;
 pub mod proc;
@@ -44,6 +45,7 @@ pub struct Kernel {
     /// Graphics engine — installed after the async wgpu device request.
     pub gfx: Option<gfx::Gfx>,
     pub hands_directives: HandsDirectives,
+    pub ai: ai::AiState,
     windows: HashMap<WinId, WinRecord>,
     next_win: u32,
     events: HashMap<Pid, Vec<KernelEvent>>,
@@ -63,9 +65,24 @@ impl Kernel {
                 tuning: HandsTuning::default(),
                 generation: 0,
             },
+            ai: ai::AiState::default(),
             windows: HashMap::new(),
             next_win: 1,
             events: HashMap::new(),
+        }
+    }
+
+    /// Streamed LLM delta from the platform → AiChunk event to the requester.
+    pub fn ai_chunk(&mut self, agent: u32, delta: String, done: bool) {
+        if let Some(requester) = self.ai.chunk(agent, &delta, done) {
+            self.push_event(
+                requester,
+                KernelEvent::AiChunk {
+                    agent: pmos_abi::AgentId(agent),
+                    text: delta,
+                    done,
+                },
+            );
         }
     }
 
@@ -217,6 +234,27 @@ impl KernelApi for Kernel {
             Syscall::SysQuery { path } => {
                 self.require(caller, &Capability::SysQuery)?;
                 log::debug!("sys query: {path} (synthetic /sys lands in M6)");
+                Ok(Reply::None)
+            }
+            Syscall::AiConfigure(cfg) => {
+                self.require(caller, &Capability::AiPrompt)?;
+                self.ai.set_config(cfg, true);
+                Ok(Reply::None)
+            }
+            Syscall::AiPrompt { agent, msg } => {
+                self.require(caller, &Capability::AiPrompt)?;
+                if let Err(e) = self.ai.prompt(agent, caller, msg) {
+                    // Deliver the failure as a terminal chunk so callers have
+                    // one uniform streaming path.
+                    self.push_event(
+                        caller,
+                        KernelEvent::AiChunk {
+                            agent,
+                            text: format!("⚠ {e}"),
+                            done: true,
+                        },
+                    );
+                }
                 Ok(Reply::None)
             }
             Syscall::CameraStart => {
