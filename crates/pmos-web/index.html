@@ -126,6 +126,10 @@
     </style>
   </head>
   <body>
+    <link data-trunk rel="copy-file" href="gesture.js" />
+    <link data-trunk rel="copy-file" href="gesture-worker.js" />
+    <script src="gesture.js"></script>
+
     <!-- Backdrop -->
     <canvas id="starfield" aria-hidden="true"></canvas>
     <div class="nebula a" aria-hidden="true"></div>
@@ -302,7 +306,10 @@
           booted = true;
           localStorage.setItem(PERMS_KEY, JSON.stringify(perms));
           document.getElementById("landing").classList.add("fade-out");
-          setTimeout(() => window.wasmBindings.pmos_launch(JSON.stringify(perms)), 900);
+          setTimeout(() => {
+            window.wasmBindings.pmos_launch(JSON.stringify(perms));
+            if (perms.camera) window.pmosGestures?.start();
+          }, 900);
         };
 
         btn.onclick = () => {

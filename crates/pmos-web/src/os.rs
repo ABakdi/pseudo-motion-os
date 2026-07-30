@@ -29,7 +29,9 @@ pub fn pmos_launch(permissions_json: String) {
     }
     log::info!("launch requested, permissions: {permissions_json}");
 
-    let doc = web_sys::window().and_then(|w| w.document()).expect("document");
+    let doc = web_sys::window()
+        .and_then(|w| w.document())
+        .expect("document");
     if let Some(landing) = doc.get_element_by_id("landing") {
         let _ = landing.set_attribute("hidden", "");
     }
@@ -44,6 +46,27 @@ pub fn pmos_launch(permissions_json: String) {
 
 fn now_secs() -> f64 {
     web_sys::window().unwrap().performance().unwrap().now() / 1000.0
+}
+
+// ---------- gesture-worker bridge ----------
+// gesture.js delivers landmark frames here; the frame loop drains them into
+// the kernel. Only the freshest frame matters (the recognizer is stateful).
+
+thread_local! {
+    static HAND_FRAME: RefCell<Option<(Vec<f32>, u32)>> = const { RefCell::new(None) };
+    static CAMERA_STATUS: RefCell<Option<bool>> = const { RefCell::new(None) };
+}
+
+/// Called by gesture.js with `hands * 63` floats (21 landmarks × x,y,z).
+#[wasm_bindgen]
+pub fn pmos_hands_frame(data: Vec<f32>, hands: u32) {
+    HAND_FRAME.with(|f| *f.borrow_mut() = Some((data, hands)));
+}
+
+/// Called by gesture.js when the camera pipeline comes up or fails.
+#[wasm_bindgen]
+pub fn pmos_camera_status(enabled: bool) {
+    CAMERA_STATUS.with(|s| *s.borrow_mut() = Some(enabled));
 }
 
 struct OsApp {
@@ -117,6 +140,21 @@ impl OsApp {
             self.shell = Some(Shell::new(&mut self.kernel));
         }
 
+        // Drain the gesture bridge into the kernel input pipeline.
+        let now = now_secs();
+        let ppp = self.egui_ctx.pixels_per_point();
+        let viewport = [
+            window.inner_size().width as f32 / ppp,
+            window.inner_size().height as f32 / ppp,
+        ];
+        if let Some(enabled) = CAMERA_STATUS.with(|s| s.borrow_mut().take()) {
+            self.kernel.set_camera_status(enabled);
+        }
+        if let Some((data, hands)) = HAND_FRAME.with(|f| f.borrow_mut().take()) {
+            self.kernel.hand_frame(&data, hands, viewport, now);
+        }
+        self.kernel.tick_hands(now);
+
         let time = (now_secs() - self.boot_time) as f32;
         let raw_input = egui_state.take_egui_input(window);
 
@@ -132,7 +170,12 @@ impl OsApp {
             .egui_ctx
             .tessellate(output.shapes, output.pixels_per_point);
         if let Some(gfx) = self.kernel.gfx.as_mut() {
-            gfx.render(&primitives, &output.textures_delta, output.pixels_per_point, time);
+            gfx.render(
+                &primitives,
+                &output.textures_delta,
+                output.pixels_per_point,
+                time,
+            );
         }
     }
 }
@@ -207,7 +250,11 @@ impl ApplicationHandler for OsApp {
             WindowEvent::CloseRequested => event_loop.exit(),
             // Stage camera controls — only when egui didn't claim the input
             // (UI spec §3.4).
-            WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => {
                 if state == ElementState::Pressed && !egui_wants {
                     let t = now_secs();
                     if t - self.last_press < 0.35 {
@@ -224,8 +271,7 @@ impl ApplicationHandler for OsApp {
             WindowEvent::CursorMoved { position, .. } => {
                 let pos = (position.x as f32, position.y as f32);
                 if self.dragging && !egui_wants {
-                    if let (Some(last), Some(gfx)) = (self.last_cursor, self.kernel.gfx.as_mut())
-                    {
+                    if let (Some(last), Some(gfx)) = (self.last_cursor, self.kernel.gfx.as_mut()) {
                         gfx.camera.orbit(pos.0 - last.0, pos.1 - last.1);
                     }
                 }
