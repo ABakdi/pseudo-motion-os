@@ -12,6 +12,19 @@ Entry format:
 
 ---
 
+## [2026-07-30] — Milestone 2: the 3D desktop
+### Code
+- `pmos-kernel/gfx`: graphics engine — wgpu 29 render graph (galaxy sky pass → holo-grid floor pass → egui overlay), orbit camera with pitch/zoom clamps, WGSL shaders. The galaxy uses a rotation-only inverse view-projection: it is unreachable by construction (UI spec §1).
+- `pmos-abi`: `KernelApi` trait + `Reply` (userland's complete kernel surface), `ProcRegister` syscall.
+- `pmos-kernel`: syscall dispatcher with per-call capability checks, process table (shell = Pid 1, shell grant; minimal default grant for apps), window registry, per-process event queues; minimal input pipeline with source tags.
+- `pmos-apps`: the shell — floating stage icons (3D positions projected to overlay, bob/hover/labels), egui window manager, dock with running indicators, PMOS theme; built-in app stubs (Terminal with help/about/clear, Files, Notes scratch, Settings, Browser).
+- `pmos-web`: winit `ApplicationHandler` on the stage canvas, async wgpu init, camera input routing (egui gets first claim), per-frame canvas/surface size sync, idempotent `pmos_launch`.
+- Trunk.toml: watch the whole workspace (was only watching `pmos-web`, silently serving stale builds).
+- Verified in Chrome end-to-end: launch → galaxy/floor/icons/dock render, orbit/zoom/reset, icon click → app window (real kernel processes: Terminal Pid 2, Settings Pid 3), terminal input.
+- Debugging notes for posterity: a canvas-sized-by-CSS surface configured before layout settles renders as one uniform stretched color (fix: per-frame size sync); egui's bundled emoji font lacks 🗂 (renders tofu; 📁 works).
+### Specs
+- [[Todo]]: M2 marked done with verification notes and a known input-routing quirk deferred to M4.
+
 ## [2026-07-30] — Added local development guide
 ### Specs
 - New [[Running Locally]]: prerequisites (incl. the prebuilt-trunk fallback for the `libdeflate-sys` build failure), verify/run/build commands, dev tips (resetting onboarding, kernel logs), troubleshooting; linked from the README.

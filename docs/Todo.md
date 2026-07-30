@@ -30,17 +30,18 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
     - [x] Permission state persisted (localStorage for now — migrates to `/sys/permissions` when the VFS lands in M6); returning users skip onboarding entirely. *(verified in Chrome)*
 - [x] **Transition** — landing fades out (0.9 s) into the OS root; kernel constructs and reports ABI v1.0 (real desktop arrives in M2). *(verified end-to-end in Chrome, including console logs)*
 
-## M2 — Desktop: 3D Space, Galaxy, App Icons
+## M2 — Desktop: 3D Space, Galaxy, App Icons ✅
 *Goal: the OS desktop — a 3D space wrapped in a distant galaxy that can never be reached, floating app icons that open windows, full mouse/keyboard control.*
 
-- [ ] **wgpu foundation** — device/queue/surface init on the canvas, render-graph skeleton (clear → stage pass → overlay pass), resize handling, frame timing in `/sys/fps`. *(Spec: [[Architecture#4.1]])*
-- [ ] **egui integration** — `egui-wgpu` overlay pass; demo window proves 2D UI composites over 3D.
-- [ ] **Galaxy skybox** — procedural starfield + nebula rendered at infinite depth (fullscreen shader driven by view *rotation only* — zoom/translation never changes parallax, so it is provably unreachable); slow drift + twinkle animation. *(Spec: [[UI#1. The Two Planes]])*
-- [ ] **Stage camera** — orbit/zoom with mouse (drag = orbit, wheel = zoom), zoom clamped to \[min, max]; `Home`/double-click = reset view.
-- [ ] **Floating app icons** — system apps (Terminal, Files, Notes, Settings, Browser) as glowing billboard icons arranged in the space; hover glow, click → opens the app window; label fades in on hover. *(Spec: [[UI#2.8 Floating app icons]])*
-- [ ] **Window manager v1** — draggable/resizable/closable egui windows, focus model, taskbar/dock strip. *(Spec: [[UI#2. Shell Elements]])*
-- [ ] **Kernel ABI v1 live** — syscall dispatcher + process registry + capability checks wired; shell and each opened app run as registered processes; the ABI stops being a stub. *(Spec: [[Architecture#6]])*
-- [ ] **Keyboard & mouse** — full winit event routing through the input pipeline with source tags (foundation for gesture fusion in M3).
+- [x] **wgpu foundation** — device/queue/surface on the canvas (async init handed back through a cell), render graph (sky → floor → egui overlay), per-frame canvas/surface size sync (CSS-sized canvas; initial Resized events can predate gfx — learned the hard way: a stale tiny surface renders as one uniform stretched color). Frame timing to `/sys/fps` deferred to M6 with the `/sys` tree.
+- [x] **egui integration** — `egui-wgpu` 0.35 renderer as the overlay pass; PMOS dark theme tokens applied ([[UI#6]]).
+- [x] **Galaxy skybox** — WGSL fullscreen pass: 3-layer hashed starfield with twinkle, two drifting fbm nebulae (ion blue / violet), tilted milky band; driven by a **rotation-only** inverse view-projection so zoom/translation never changes parallax — unreachable by construction. *(verified in Chrome)*
+- [x] **Stage camera** — orbit (drag), zoom (wheel, clamped 5–26 units), pitch clamps, `Home` + double-click reset. *(verified)*
+- [x] **Floating app icons** — the five system apps as glowing circles living at 3D stage positions, projected to the overlay each frame (bob animation, perspective scale, hover glow + label, open-indicator dot); click launches. *(verified — note: 🗂 is missing from egui's emoji font, use glyphs that render: 📁 does)*
+- [x] **Window manager v1** — egui windows (drag/resize/collapse/close), focus, bottom dock mirroring the apps with running dots. Built-in app stubs: Terminal (help/about/clear), Files, Notes scratchpad, Settings, Browser.
+- [x] **Kernel ABI v1 live** — `KernelApi` trait in `pmos-abi`; dispatcher with per-syscall capability checks; process table (shell = Pid 1 with shell grant, apps get minimal default); each opened app registers as a real process and opens its window via `ProcRegister`/`WinCreate` syscalls. *(verified: console shows Terminal=Pid(2), Settings=Pid(3))*
+- [x] **Keyboard & mouse** — winit events → egui first, unconsumed input drives the camera; pointer moves flow through the kernel input pipeline with source tags (fusion foundation for M3).
+- *Known quirk for M4:* releasing a camera-orbit drag over an icon can register as a click — proper press-origin routing arrives with the M4 input work.
 
 ## M3 — Camera & Hand Gesture Detection
 *Goal: webcam on, hands tracked, gestures recognized — and a living cursor that morphs with the hand.*
