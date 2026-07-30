@@ -12,6 +12,16 @@ Entry format:
 
 ---
 
+## [2026-07-30] — Milestone 5: LLM integration and app conjuring (core slice)
+### Code
+- `pmos-conjure` fully implemented: strict document model, the Conjure expression language (precedence parser, templates, 20+ builtins, ternaries, safe division), interpreter with step/if/emit budgets (a runaway emit chain can neither loop nor overflow the stack), 7-stage validator emitting machine-readable errors for the repair loop; pomodoro example doc; 13 tests.
+- `pmos-kernel/ai`: agents as kernel objects (System Assistant, App Smith) — the kernel composes full provider requests so API keys never cross into JS as config; Anthropic + OpenAI-compatible bodies; bounded history; `AiConfigure`/`AiPrompt` syscalls; streamed deltas fan out as `AiChunk` events.
+- `pmos-web`: `llm.js` fetch+SSE bridge (both provider framings, friendly error chunks); provider config persisted to localStorage and restored at boot.
+- `pmos-apps`: **App Host** rendering Conjure documents with live bindings; **command palette** (dock ✨ / Ctrl+K / 🤙 tap) with fuzzy commands, streaming `>` assistant chat, and the `make …` conjuring flow with auto-repair (validation errors + previous document fed back, ≤2 rounds); Settings → AI provider form (masked key); notify effects surface as toasts.
+- Verified offline in Chrome: `demo` in the palette spawned the pomodoro through validate → ProcRegister/WinCreate → App Host; timer ticked live and the Start/Pause ternary re-rendered. Live LLM streaming awaits a user API key.
+### Specs
+- [[Todo]]: M5 core done; deferred to M6+: consent sheets, /apps persistence + modify-existing, voice, budget caps, tool-calling, remaining widget surface (list_view/canvas/dropdown).
+
 ## [2026-07-30] — Milestone 4: gesture control
 ### Code
 - `pmos-kernel/input/fusion` (new): pose → pointer-intent state machine — pinch = primary press/release, middle-pinch = secondary, two-finger = scroll (pointer parks, natural direction), grab = whole-hand drag; guaranteed release of held buttons on tracking loss; 4 unit tests.

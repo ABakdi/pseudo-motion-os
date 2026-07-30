@@ -1,4 +1,4 @@
-# Todo — Roadmap
+-+# Todo — Roadmap
 **Pseudo Motion OS** · part of [[Pseudo Motion OS]]
 
 Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pending. Every completed item gets its [[Changelog]] entry. Specs referenced per task.
@@ -65,16 +65,17 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 - [ ] *(moved to M7)* **3D object interaction** — grab/throw stage objects: the stage currently has no objects (floating icons were removed); lands with rapier props.
 - *Verification note:* full pinch-click cycles need real framerate (egui's 0.8 s click window) — remote frame-pumped testing confirms hover/press/release mechanics; live-webcam click/drag confirmation by user.
 
-## M5 — LLM Integration & Conjuring
+## M5 — LLM Integration & Conjuring ✅ *(core slice; deferrals annotated)*
 *Goal: the AI is alive — palette conversations, system control, and apps conjured from natural language.*
 
-- [ ] **Provider layer** — `LlmProvider` trait; Anthropic (direct-browser CORS) + OpenAI-compatible (covers Ollama/LM Studio local) backends; streaming (SSE). *(Spec: [[AI System#2]])*
-- [ ] **Settings → AI** — provider profiles UI, key entry (masked, kernel-side only), model pick, budget caps.
-- [ ] **Agent manager** — agents as kernel objects; System Assistant + App Smith templates; capability-derived tool schemas; tool-call log to `/sys/ai/log`. *(Spec: [[AI System#1, #3]])*
-- [ ] **Command palette** — `Ctrl+K` / 🤙 tap; command mode + AI mode with streaming; voice mode wiring (Web Speech). *(Spec: [[UI#2.4]])*
-- [ ] **Conjure runtime** — complete `pmos-conjure`: full schema, expression parser/evaluator, action interpreter, limits; App Host process. *(Spec: [[App DSL]])*
-- [ ] **App Smith loop** — generate → validate → repair (≤3 rounds) → spawn; save to `/apps`; modify-existing-app flow. *(Spec: [[AI System#4]])*
-- [ ] **Consent sheets** — capability requests from agents and conjured apps. *(Spec: [[UI#5]])*
+- [x] **Conjure runtime** — `pmos-conjure` is real: document model (strict schema), expression language (tokenizer + precedence parser + evaluator, templates, 20+ builtins, ternary, divide-by-zero-safe), action interpreter with step/if/emit-depth budgets, 7-stage validator with machine-readable errors, and the App Host rendering the v1 widget subset (column/row/group/scroll/label/button/text_input/slider/checkbox/progress/if) with live bindings. 13 native tests. *(Spec: [[App DSL]] — list_view/canvas/dropdown/map-actions are the remaining spec surface.)*
+- [x] **Provider layer** — kernel builds complete requests (keys never leave it); Anthropic (direct-browser CORS header) + OpenAI-compatible (covers Ollama/LM Studio) with SSE streaming through a thin JS fetch bridge (`llm.js`). *(Spec: [[AI System#2]])*
+- [x] **Agent manager** — System Assistant + App Smith as kernel agents with system prompts (the App Smith prompt embeds the compact Conjure contract), bounded per-agent history, one uniform streaming path (errors arrive as terminal chunks). Capability-derived tool schemas + `/sys/ai/log` deferred to M6 (needs the /sys tree).
+- [x] **Settings → AI** — provider/base-URL/model/masked-key form issuing `AiConfigure`; config persists across reloads (localStorage until the VFS; documented caveat). Budget caps deferred.
+- [x] **Command palette** — dock ✨ / `Ctrl+K` / 🤙 tap; three modes: fuzzy commands (app names, `demo`, `launcher`), `>` assistant chat with streaming, `make/create/build/conjure …` App Smith flow. Voice wiring deferred to M6 (with notes/whisper work).
+- [x] **App Smith loop** — generate → extract JSON → validate → auto-repair (≤2 rounds, errors+document fed back) → spawn as a real process via `ProcRegister`/`WinCreate`. Save-to-`/apps` + modify-existing deferred to M6 (VFS).
+- [ ] **Consent sheets** — deferred: conjured apps currently receive only the default capability set (requested capabilities are ignored), so no consent surface is required yet. *(Spec: [[UI#5]])*
+- *Verified in Chrome offline:* palette open (dock ✨ — new, also specced §2.2), `demo` command → pomodoro Conjure app spawned through the full validate→syscalls→App Host path, timer live (25:00 → 24:59), Start→Pause ternary re-render, toasts/notify path in place. **Real LLM streaming needs an API key — user to confirm via Settings → AI.**
 
 ## M6 — VFS & Core Apps
 *Goal: real persistent files and the built-in userland.*
