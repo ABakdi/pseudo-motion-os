@@ -4,6 +4,7 @@
 //! event stream. M2 wired the mouse/keyboard leg; M3 adds the hand pipeline
 //! (`hands`): landmark ingestion, One-Euro filtering, pose classification.
 
+pub mod fusion;
 pub mod hands;
 
 use pmos_abi::{InputSource, KernelEvent};
@@ -16,6 +17,8 @@ pub struct InputPipeline {
     pub active_source: InputSource,
     /// Hand tracking and gesture recognition state.
     pub hands: hands::HandsState,
+    /// Pose → pointer-intent fusion (M4: gestures control the UI).
+    pub fusion: fusion::Fusion,
 }
 
 impl InputPipeline {
@@ -24,6 +27,7 @@ impl InputPipeline {
             frame_events: Vec::new(),
             active_source: InputSource::Mouse,
             hands: hands::HandsState::new(),
+            fusion: fusion::Fusion::new(),
         }
     }
 

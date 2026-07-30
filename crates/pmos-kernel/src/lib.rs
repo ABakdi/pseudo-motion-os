@@ -79,6 +79,8 @@ impl Kernel {
         self.input.hands.ingest(data, hands, viewport, now);
         if let Some(pos) = self.input.hands.cursor {
             self.input.pointer_moved(pos, pmos_abi::InputSource::Hand);
+            let (pose, tracking) = (self.input.hands.pose, self.input.hands.tracking);
+            self.input.fusion.step(pose, pos, tracking);
         }
         self.publish_hand_state();
         // Raw landmarks flow only while the viewer wants them, and only to
@@ -103,6 +105,11 @@ impl Kernel {
         let was_tracking = self.input.hands.tracking;
         self.input.hands.tick(now);
         if was_tracking != self.input.hands.tracking {
+            if !self.input.hands.tracking {
+                // Release anything the hand was holding (spec §7).
+                let pos = self.input.hands.cursor.unwrap_or([0.0, 0.0]);
+                self.input.fusion.lost(pos);
+            }
             self.publish_hand_state();
         }
     }
