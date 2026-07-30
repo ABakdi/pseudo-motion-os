@@ -55,6 +55,7 @@ fn now_secs() -> f64 {
 thread_local! {
     static HAND_FRAME: RefCell<Option<(Vec<f32>, u32)>> = const { RefCell::new(None) };
     static CAMERA_STATUS: RefCell<Option<bool>> = const { RefCell::new(None) };
+    static CAMERA_PIXELS: RefCell<Option<(Vec<u8>, u32, u32)>> = const { RefCell::new(None) };
 }
 
 /// Called by gesture.js with `hands * 63` floats (21 landmarks × x,y,z).
@@ -69,6 +70,45 @@ pub fn pmos_camera_status(enabled: bool) {
     CAMERA_STATUS.with(|s| *s.borrow_mut() = Some(enabled));
 }
 
+/// Preview pixels for the Hand Tracker viewer (RGBA, mirrored). These go
+/// straight into an egui texture for the shell — deliberately NEVER through
+/// the kernel (Hand Gestures spec §7 privacy boundary).
+#[wasm_bindgen]
+pub fn pmos_camera_frame(data: Vec<u8>, w: u32, h: u32) {
+    CAMERA_PIXELS.with(|p| *p.borrow_mut() = Some((data, w, h)));
+}
+
+/// Apply kernel hands-directives to the JS pipeline (configure + start).
+fn apply_hands_directives(d: &pmos_kernel::HandsDirectives, camera_start: bool) {
+    let Some(win) = web_sys::window() else { return };
+    let Ok(g) = js_sys::Reflect::get(&win, &JsValue::from_str("pmosGestures")) else {
+        return;
+    };
+    if g.is_undefined() {
+        return;
+    }
+    let opts = js_sys::Object::new();
+    let set = |k: &str, v: JsValue| {
+        let _ = js_sys::Reflect::set(&opts, &JsValue::from_str(k), &v);
+    };
+    set("streamFeed", JsValue::from_bool(d.stream_feed));
+    set("numHands", JsValue::from_f64(d.tuning.num_hands as f64));
+    set("detConf", JsValue::from_f64(d.tuning.det_conf as f64));
+    set("trackConf", JsValue::from_f64(d.tuning.track_conf as f64));
+    if let Ok(f) = js_sys::Reflect::get(&g, &JsValue::from_str("configure")) {
+        if let Some(f) = f.dyn_ref::<js_sys::Function>() {
+            let _ = f.call1(&g, &opts);
+        }
+    }
+    if camera_start {
+        if let Ok(f) = js_sys::Reflect::get(&g, &JsValue::from_str("start")) {
+            if let Some(f) = f.dyn_ref::<js_sys::Function>() {
+                let _ = f.call0(&g);
+            }
+        }
+    }
+}
+
 struct OsApp {
     window: Option<Arc<Window>>,
     canvas: Option<web_sys::HtmlCanvasElement>,
@@ -79,6 +119,9 @@ struct OsApp {
     egui_ctx: egui::Context,
     egui_state: Option<egui_winit::State>,
     boot_time: f64,
+    /// Hand Tracker preview texture (pixels never touch the kernel).
+    camera_tex: Option<egui::TextureHandle>,
+    applied_hands_generation: u32,
     // camera interaction
     dragging: bool,
     last_cursor: Option<(f32, f32)>,
@@ -96,6 +139,8 @@ impl OsApp {
             egui_ctx: egui::Context::default(),
             egui_state: None,
             boot_time: now_secs(),
+            camera_tex: None,
+            applied_hands_generation: 0,
             dragging: false,
             last_cursor: None,
             last_press: 0.0,
@@ -155,6 +200,29 @@ impl OsApp {
         }
         self.kernel.tick_hands(now);
 
+        // Apply changed hands directives to the JS pipeline (exactly once
+        // per generation), then upload any fresh preview pixels.
+        if self.kernel.hands_directives.generation != self.applied_hands_generation {
+            self.applied_hands_generation = self.kernel.hands_directives.generation;
+            let start = self.kernel.hands_directives.camera_start;
+            self.kernel.hands_directives.camera_start = false;
+            apply_hands_directives(&self.kernel.hands_directives, start);
+        }
+        if let Some((data, w, h)) = CAMERA_PIXELS.with(|p| p.borrow_mut().take()) {
+            let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &data);
+            match &mut self.camera_tex {
+                Some(tex) => tex.set(img, egui::TextureOptions::LINEAR),
+                None => {
+                    self.camera_tex = Some(self.egui_ctx.load_texture(
+                        "camera-preview",
+                        img,
+                        egui::TextureOptions::LINEAR,
+                    ));
+                }
+            }
+        }
+        let camera_feed = self.camera_tex.as_ref().map(|t| t.id());
+
         let time = (now_secs() - self.boot_time) as f32;
         let raw_input = egui_state.take_egui_input(window);
 
@@ -162,7 +230,7 @@ impl OsApp {
         let shell = self.shell.as_mut().unwrap();
         let kernel = &mut self.kernel;
         self.egui_ctx.begin_pass(raw_input);
-        shell.update(&self.egui_ctx, kernel);
+        shell.update(&self.egui_ctx, kernel, camera_feed);
         let output = self.egui_ctx.end_pass();
 
         egui_state.handle_platform_output(window, output.platform_output);

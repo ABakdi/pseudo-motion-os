@@ -6,24 +6,40 @@ const MODEL =
   "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
 let landmarker = null;
+let fileset = null;
+let makeLandmarker = null;
+
+async function build(opts = {}) {
+  landmarker = await makeLandmarker(fileset, {
+    baseOptions: { modelAssetPath: MODEL, delegate: "GPU" },
+    runningMode: "VIDEO",
+    numHands: opts.numHands ?? 2,
+    minHandDetectionConfidence: opts.detConf ?? 0.5,
+    minTrackingConfidence: opts.trackConf ?? 0.5,
+  });
+}
 
 (async () => {
   try {
     const { FilesetResolver, HandLandmarker } = await import(`${VISION}/vision_bundle.mjs`);
-    const fileset = await FilesetResolver.forVisionTasks(`${VISION}/wasm`);
-    landmarker = await HandLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: MODEL, delegate: "GPU" },
-      runningMode: "VIDEO",
-      numHands: 2,
-    });
+    fileset = await FilesetResolver.forVisionTasks(`${VISION}/wasm`);
+    makeLandmarker = (f, o) => HandLandmarker.createFromOptions(f, o);
+    await build();
     postMessage({ type: "ready" });
   } catch (e) {
     postMessage({ type: "error", message: String(e) });
   }
 })();
 
-onmessage = (e) => {
+onmessage = async (e) => {
   const m = e.data;
+  if (m.type === "configure" && fileset) {
+    const old = landmarker;
+    landmarker = null;
+    old?.close?.();
+    await build(m);
+    return;
+  }
   if (m.type !== "frame" || !landmarker) {
     m.bitmap?.close?.();
     return;
