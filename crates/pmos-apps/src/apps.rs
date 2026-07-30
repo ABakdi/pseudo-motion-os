@@ -10,8 +10,13 @@ pub enum AppKind {
     Browser,
 }
 
-pub const ALL: [AppKind; 5] =
-    [AppKind::Terminal, AppKind::Files, AppKind::Notes, AppKind::Settings, AppKind::Browser];
+pub const ALL: [AppKind; 5] = [
+    AppKind::Terminal,
+    AppKind::Files,
+    AppKind::Notes,
+    AppKind::Settings,
+    AppKind::Browser,
+];
 
 impl AppKind {
     pub fn title(self) -> &'static str {
@@ -125,7 +130,10 @@ impl AppState {
                 "help" => {
                     Some("commands: help, about, clear — the real parser lands in M6".to_string())
                 }
-                "about" => Some(format!("Pseudo Motion OS · ABI {:?}", pmos_abi::ABI_VERSION)),
+                "about" => Some(format!(
+                    "Pseudo Motion OS · ABI {:?}",
+                    pmos_abi::ABI_VERSION
+                )),
                 "clear" => {
                     self.terminal_log.clear();
                     None

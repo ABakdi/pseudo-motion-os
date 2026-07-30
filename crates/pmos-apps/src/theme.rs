@@ -18,8 +18,7 @@ pub fn apply(ctx: &egui::Context) {
         v.override_text_color = Some(INK);
         v.panel_fill = Color32::from_rgba_unmultiplied(0x0d, 0x0f, 0x1c, 0xd8);
         v.window_fill = Color32::from_rgba_unmultiplied(0x0d, 0x0f, 0x1c, 0xea);
-        v.window_stroke =
-            Stroke::new(1.0, Color32::from_rgba_unmultiplied(0x8b, 0x93, 0xa9, 0x38));
+        v.window_stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(0x8b, 0x93, 0xa9, 0x38));
         v.window_corner_radius = CornerRadius::same(12);
         v.menu_corner_radius = CornerRadius::same(10);
         v.selection.bg_fill = Color32::from_rgba_unmultiplied(0x6e, 0xe7, 0xff, 0x50);

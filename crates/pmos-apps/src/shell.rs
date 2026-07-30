@@ -2,8 +2,9 @@
 //! Talks to the kernel strictly through the ABI.
 
 use crate::apps::{AppKind, AppState, ALL};
+use crate::cursor::HandCursor;
 use crate::theme;
-use pmos_abi::{KernelApi, Pid, Reply, Syscall, WinDesc, WinId};
+use pmos_abi::{KernelApi, KernelEvent, Pid, Reply, Syscall, WinDesc, WinId};
 
 struct OpenApp {
     pid: Pid,
@@ -16,6 +17,7 @@ struct OpenApp {
 pub struct Shell {
     pid: Pid,
     open_apps: Vec<OpenApp>,
+    cursor: HandCursor,
     themed: bool,
 }
 
@@ -23,14 +25,24 @@ impl Shell {
     pub fn new(kernel: &mut dyn KernelApi) -> Self {
         // The kernel guarantees the first registered process is the shell
         // (pid 1) and grants it the shell capability set.
-        let pid = match kernel.syscall(Pid(0), Syscall::ProcRegister { name: "shell".into() }) {
+        let pid = match kernel.syscall(
+            Pid(0),
+            Syscall::ProcRegister {
+                name: "shell".into(),
+            },
+        ) {
             Ok(Reply::Pid(pid)) => pid,
             other => {
                 log::error!("shell registration failed: {other:?}");
                 Pid(1)
             }
         };
-        Self { pid, open_apps: Vec::new(), themed: false }
+        Self {
+            pid,
+            open_apps: Vec::new(),
+            cursor: HandCursor::new(),
+            themed: false,
+        }
     }
 
     pub fn update(&mut self, ctx: &egui::Context, kernel: &mut dyn KernelApi) {
@@ -39,11 +51,30 @@ impl Shell {
             self.themed = true;
         }
         for ev in kernel.poll_events(self.pid) {
-            log::debug!("shell event: {ev:?}");
+            match ev {
+                KernelEvent::HandUpdate {
+                    pose,
+                    pinch,
+                    pos,
+                    tracking,
+                    hands,
+                } => {
+                    self.cursor.pose = pose;
+                    self.cursor.pinch = pinch;
+                    if pos.is_some() {
+                        self.cursor.pos = pos; // tracking-lost keeps the last position (frozen)
+                    }
+                    self.cursor.tracking = tracking;
+                    self.cursor.hands = hands;
+                }
+                KernelEvent::CameraStatus { enabled } => self.cursor.camera_enabled = enabled,
+                other => log::debug!("shell event: {other:?}"),
+            }
         }
         self.windows(ctx, kernel);
         self.dock(ctx, kernel);
         self.help_hint(ctx);
+        self.cursor.draw(ctx);
     }
 
     fn is_open(&self, kind: AppKind) -> bool {
@@ -58,13 +89,19 @@ impl Shell {
         }
         // Each app is a real kernel process: register, then open its window
         // via capability-checked syscalls (the ABI's permanent smoke test).
-        let Ok(Reply::Pid(pid)) =
-            kernel.syscall(self.pid, Syscall::ProcRegister { name: kind.title().into() })
-        else {
+        let Ok(Reply::Pid(pid)) = kernel.syscall(
+            self.pid,
+            Syscall::ProcRegister {
+                name: kind.title().into(),
+            },
+        ) else {
             return;
         };
-        let desc =
-            WinDesc { title: kind.title().into(), size: kind.default_size(), resizable: true };
+        let desc = WinDesc {
+            title: kind.title().into(),
+            size: kind.default_size(),
+            resizable: true,
+        };
         let Ok(Reply::Win(win)) = kernel.syscall(pid, Syscall::WinCreate(desc)) else {
             return;
         };
@@ -101,10 +138,7 @@ impl Shell {
             .open(&mut open);
             let win = if app.focus {
                 app.focus = false;
-                win.default_pos(egui::pos2(
-                    120.0 + i as f32 * 36.0,
-                    90.0 + i as f32 * 30.0,
-                ))
+                win.default_pos(egui::pos2(120.0 + i as f32 * 36.0, 90.0 + i as f32 * 30.0))
             } else {
                 win
             };
@@ -157,7 +191,11 @@ impl Shell {
             .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 10.0))
             .order(egui::Order::Background)
             .show(ctx, |ui| {
-                ui.weak("drag: orbit · wheel: zoom · Home: reset");
+                ui.horizontal(|ui| {
+                    ui.weak(self.cursor.tray_text());
+                    ui.weak("·");
+                    ui.weak("drag: orbit · wheel: zoom · Home: reset");
+                });
             });
     }
 }

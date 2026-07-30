@@ -6,5 +6,6 @@
 //! the crate graph enforces it (no `pmos-kernel` dependency).
 
 pub mod apps;
+pub mod cursor;
 pub mod shell;
 pub mod theme;
