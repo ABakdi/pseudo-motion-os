@@ -61,6 +61,9 @@ pub struct WinDesc {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Syscall {
+    // process registration (built-in apps register at open; Conjure apps
+    // are registered by the App Host)
+    ProcRegister { name: String },
     // window
     WinCreate(WinDesc),
     WinClose(WinId),
@@ -130,4 +133,22 @@ pub enum ErrorCode {
     NotFound,
     InvalidArgument,
     Unsupported,
+}
+
+/// Synchronous syscall replies. v1 dispatches in-memory so cheap syscalls
+/// answer directly; results that take time (I/O, AI) still arrive as
+/// [`KernelEvent`]s — see Architecture §6 ("async by default").
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Reply {
+    None,
+    Pid(Pid),
+    Win(WinId),
+}
+
+/// The kernel as seen from userland. `pmos-apps` receives `&mut dyn KernelApi`
+/// and nothing else — the crate graph guarantees userland can only do what
+/// this trait (and therefore the capability checks behind it) allows.
+pub trait KernelApi {
+    fn syscall(&mut self, caller: Pid, call: Syscall) -> Result<Reply, ErrorCode>;
+    fn poll_events(&mut self, pid: Pid) -> Vec<KernelEvent>;
 }

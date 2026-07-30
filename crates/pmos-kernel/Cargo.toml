@@ -10,3 +10,6 @@ repository.workspace = true
 pmos-abi = { workspace = true }
 pmos-conjure = { workspace = true }
 log = { workspace = true }
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
+glam = { workspace = true }
