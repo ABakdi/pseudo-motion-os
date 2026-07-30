@@ -13,6 +13,7 @@ and [the Conjure app DSL](<docs/App DSL.md>).
 
 ## Development
 
+Full guide: [`docs/Running Locally.md`](<docs/Running Locally.md>).
 Requirements: Rust (stable, `wasm32-unknown-unknown` target), [trunk](https://trunkrs.dev).
 
 ```sh

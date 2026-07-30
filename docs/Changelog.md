@@ -12,6 +12,10 @@ Entry format:
 
 ---
 
+## [2026-07-30] — Added local development guide
+### Specs
+- New [[Running Locally]]: prerequisites (incl. the prebuilt-trunk fallback for the `libdeflate-sys` build failure), verify/run/build commands, dev tips (resetting onboarding, kernel logs), troubleshooting; linked from the README.
+
 ## [2026-07-30] — Milestone 1: Landing & launch experience
 ### Code
 - `pmos-web/index.html`: full landing page — animated SVG logomark (counter-orbiting gradient arcs), gradient wordmark, canvas starfield (3 depth layers, twinkle, parallax drift, `prefers-reduced-motion` aware), nebula glows, LAUNCH CTA that enables when the WASM core loads, feature cards, WebGPU-unsupported notice, design tokens as CSS variables.
