@@ -3,22 +3,310 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Pseudo Motion OS — a browser-native operating system with hand gestures, AI-conjured apps, and a desktop in deep space." />
+    <meta name="theme-color" content="#07080f" />
     <title>Pseudo Motion OS</title>
     <style>
-      /* Placeholder page — the real landing experience is milestone 1 (docs/Todo.md). */
-      html, body { margin: 0; height: 100%; background: #07080f; color: #ecf0f1;
-                   font-family: system-ui, sans-serif; display: grid; place-items: center; }
-      .wordmark { text-align: center; }
-      .wordmark h1 { font-weight: 200; letter-spacing: 0.35em; margin: 0; }
-      .wordmark p  { opacity: 0.5; letter-spacing: 0.1em; }
-      #boot-status { font-size: 0.8rem; opacity: 0.35; }
+      /* ============ design tokens (mirror these in the egui theme) ============ */
+      :root {
+        --bg: #07080f;
+        --bg-raise: #0d0f1c;
+        --ink: #e8ecf4;
+        --ink-dim: #8b93a9;
+        --accent-a: #6ee7ff;   /* ion cyan */
+        --accent-b: #c084fc;   /* nebula violet */
+        --accent-glow: rgba(110, 231, 255, 0.35);
+        --danger: #ff6b81;
+        --radius: 14px;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink);
+                   font-family: system-ui, "Segoe UI", sans-serif; }
+      body { overflow-x: hidden; }
+      [hidden] { display: none !important; }
+
+      /* ============ backdrop: starfield + nebulae ============ */
+      #starfield { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
+      .nebula { position: fixed; border-radius: 50%; filter: blur(90px); opacity: .35;
+                pointer-events: none; z-index: 0; }
+      .nebula.a { width: 55vw; height: 55vw; left: -15vw; top: -18vw;
+                  background: radial-gradient(circle, #2b4d8f 0%, transparent 65%);
+                  animation: float-a 26s ease-in-out infinite alternate; }
+      .nebula.b { width: 48vw; height: 48vw; right: -14vw; bottom: -16vw;
+                  background: radial-gradient(circle, #5b2b8f 0%, transparent 65%);
+                  animation: float-b 32s ease-in-out infinite alternate; }
+      @keyframes float-a { to { transform: translate(6vw, 4vh) scale(1.12); } }
+      @keyframes float-b { to { transform: translate(-5vw, -5vh) scale(1.08); } }
+
+      /* ============ landing layout ============ */
+      #landing { position: relative; z-index: 1; transition: opacity .9s ease; }
+      #landing.fade-out { opacity: 0; pointer-events: none; }
+
+      .hero { min-height: 100svh; display: grid; place-content: center; text-align: center;
+              padding: 4rem 1.5rem; gap: 1.1rem; }
+
+      /* logomark */
+      .logo { width: 128px; height: 128px; margin: 0 auto; }
+      .logo .core { animation: pulse 3.2s ease-in-out infinite; transform-origin: 60px 60px; }
+      .logo .orbit-a { animation: spin 14s linear infinite; transform-origin: 60px 60px; }
+      .logo .orbit-b { animation: spin-rev 22s linear infinite; transform-origin: 60px 60px; }
+      @keyframes spin     { to { transform: rotate(360deg); } }
+      @keyframes spin-rev { to { transform: rotate(-360deg); } }
+      @keyframes pulse    { 50% { transform: scale(1.15); } }
+
+      .wordmark { font-size: clamp(1.6rem, 4.5vw, 2.6rem); font-weight: 200;
+                  letter-spacing: .38em; margin: .4rem 0 0; text-indent: .38em; }
+      .wordmark b { font-weight: 600;
+                    background: linear-gradient(90deg, var(--accent-a), var(--accent-b));
+                    -webkit-background-clip: text; background-clip: text; color: transparent; }
+      .tagline { color: var(--ink-dim); font-size: clamp(.95rem, 2vw, 1.15rem);
+                 letter-spacing: .12em; margin: 0; }
+
+      /* launch CTA */
+      .cta { margin-top: 1.6rem; display: grid; gap: .55rem; justify-items: center; }
+      #launch-btn { position: relative; font: inherit; font-size: 1.05rem; letter-spacing: .22em;
+                    text-indent: .22em; padding: 1rem 3.4rem; border-radius: 999px; cursor: pointer;
+                    color: var(--ink); background: linear-gradient(var(--bg-raise), var(--bg-raise)) padding-box,
+                               linear-gradient(90deg, var(--accent-a), var(--accent-b)) border-box;
+                    border: 1.5px solid transparent; transition: transform .18s ease, box-shadow .18s ease; }
+      #launch-btn:not(:disabled):hover { transform: translateY(-2px);
+                    box-shadow: 0 0 34px var(--accent-glow), 0 0 90px rgba(192, 132, 252, .18); }
+      #launch-btn:disabled { opacity: .55; cursor: progress; }
+      #launch-sub { font-size: .78rem; color: var(--ink-dim); letter-spacing: .08em; }
+      #no-webgpu { max-width: 34rem; margin: 1.4rem auto 0; padding: 1rem 1.3rem; border-radius: var(--radius);
+                   background: rgba(255, 107, 129, .08); border: 1px solid rgba(255, 107, 129, .35);
+                   color: var(--ink); font-size: .92rem; line-height: 1.55; }
+
+      /* features */
+      .features { position: relative; z-index: 1; max-width: 62rem; margin: 0 auto;
+                  padding: 1rem 1.5rem 6rem; display: grid; gap: 1.1rem;
+                  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .card { background: rgba(13, 15, 28, .72); border: 1px solid rgba(139, 147, 169, .18);
+              border-radius: var(--radius); padding: 1.4rem 1.3rem; backdrop-filter: blur(6px); }
+      .card .ico { font-size: 1.7rem; }
+      .card h3 { margin: .6rem 0 .35rem; font-weight: 600; letter-spacing: .04em; }
+      .card p { margin: 0; color: var(--ink-dim); line-height: 1.55; font-size: .93rem; }
+
+      footer { position: relative; z-index: 1; text-align: center; color: var(--ink-dim);
+               font-size: .8rem; padding: 0 1rem 2.2rem; letter-spacing: .06em; }
+      footer a { color: var(--ink-dim); }
+
+      /* ============ permission onboarding ============ */
+      #onboarding { position: fixed; inset: 0; z-index: 5; display: grid; place-items: center;
+                    background: rgba(4, 5, 10, .78); backdrop-filter: blur(10px);
+                    opacity: 0; transition: opacity .45s ease; }
+      #onboarding.show { opacity: 1; }
+      .perm-card { width: min(26rem, calc(100vw - 2.5rem)); background: var(--bg-raise);
+                   border: 1px solid rgba(139, 147, 169, .22); border-radius: var(--radius);
+                   padding: 2rem 1.8rem 1.5rem; text-align: center; }
+      .perm-card .ico { font-size: 2.6rem; }
+      .perm-card h2 { margin: .8rem 0 .4rem; font-weight: 600; letter-spacing: .05em; }
+      .perm-card p { color: var(--ink-dim); line-height: 1.55; margin: 0 0 1.4rem; font-size: .95rem; }
+      .perm-actions { display: flex; gap: .7rem; justify-content: center; }
+      .perm-actions button { font: inherit; padding: .7rem 1.7rem; border-radius: 999px; cursor: pointer; }
+      .btn-enable { color: #05121a; font-weight: 600; border: none;
+                    background: linear-gradient(90deg, var(--accent-a), var(--accent-b)); }
+      .btn-later { background: transparent; color: var(--ink-dim);
+                   border: 1px solid rgba(139, 147, 169, .35); }
+      .perm-dots { margin-top: 1.4rem; display: flex; gap: .45rem; justify-content: center; }
+      .perm-dots span { width: 7px; height: 7px; border-radius: 50%; background: rgba(139,147,169,.35); }
+      .perm-dots span.on { background: var(--accent-a); }
+
+      /* ============ OS root (placeholder until milestone 2) ============ */
+      #os-root { position: fixed; inset: 0; z-index: 2; display: grid; place-items: center;
+                 background: var(--bg); }
+      #os-root p { color: var(--ink-dim); letter-spacing: .18em; font-size: .85rem; }
+
+      @media (prefers-reduced-motion: reduce) {
+        .logo g, .nebula { animation: none !important; }
+      }
     </style>
   </head>
   <body>
-    <div class="wordmark">
-      <h1>PSEUDO MOTION OS</h1>
-      <p>an operating dream, rendered in your browser</p>
-      <p id="boot-status">booting…</p>
+    <!-- Backdrop -->
+    <canvas id="starfield" aria-hidden="true"></canvas>
+    <div class="nebula a" aria-hidden="true"></div>
+    <div class="nebula b" aria-hidden="true"></div>
+
+    <!-- Landing (plain HTML/CSS — the OS boots only on Launch; UI spec §2.0) -->
+    <main id="landing">
+      <section class="hero">
+        <!-- Logomark: a core with two counter-orbiting arcs — motion around a still center -->
+        <svg class="logo" viewBox="0 0 120 120" role="img" aria-label="Pseudo Motion OS logo">
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#6ee7ff" />
+              <stop offset="1" stop-color="#c084fc" />
+            </linearGradient>
+          </defs>
+          <g class="orbit-a" fill="none" stroke="url(#lg)" stroke-width="6" stroke-linecap="round">
+            <path d="M60 14 A46 46 0 0 1 106 60" />
+            <path d="M60 106 A46 46 0 0 1 14 60" />
+          </g>
+          <g class="orbit-b" fill="none" stroke="url(#lg)" stroke-width="3.5" stroke-linecap="round" opacity=".65">
+            <path d="M60 32 A28 28 0 1 0 88 60" />
+          </g>
+          <circle class="core" cx="60" cy="60" r="9" fill="url(#lg)" />
+        </svg>
+
+        <h1 class="wordmark">PSEUDO <b>MOTION</b> OS</h1>
+        <p class="tagline">conjure your computer — an operating dream, rendered in your browser</p>
+
+        <div class="cta">
+          <button id="launch-btn" disabled>LAUNCH</button>
+          <span id="launch-sub">loading core…</span>
+        </div>
+        <div id="no-webgpu" hidden>
+          <strong>This browser can't run Pseudo Motion OS.</strong><br />
+          PMOS needs WebGPU — available in Chrome/Edge 113+, Safari 26+, and Firefox 141+.
+          The tour below still works everywhere.
+        </div>
+      </section>
+
+      <section class="features">
+        <div class="card">
+          <div class="ico">🖐️</div>
+          <h3>Gesture-native</h3>
+          <p>Your webcam becomes an input device. Point, pinch, grab and throw — windows and objects obey your hands, with a cursor that morphs to match every gesture.</p>
+        </div>
+        <div class="card">
+          <div class="ico">✨</div>
+          <h3>Apps conjured by AI</h3>
+          <p>Ask out loud for a timer, a quiz, a visualizer — the built-in assistant generates a working, sandboxed app in seconds. Your words are the SDK.</p>
+        </div>
+        <div class="card">
+          <div class="ico">🌌</div>
+          <h3>A desktop in deep space</h3>
+          <p>Work inside a physically simulated 3D scene wrapped in a galaxy you can never reach, with real-time ray tracing painting the scenery.</p>
+        </div>
+      </section>
+
+      <footer>
+        local-first · no accounts · open source —
+        <a href="https://github.com/ABakdi/pseudo-motion-os">github.com/ABakdi/pseudo-motion-os</a>
+      </footer>
+    </main>
+
+    <!-- Permission onboarding (UI spec §2.0: user-gesture-driven, each skippable) -->
+    <div id="onboarding" hidden>
+      <div class="perm-card">
+        <div class="ico" id="perm-ico"></div>
+        <h2 id="perm-title"></h2>
+        <p id="perm-why"></p>
+        <div class="perm-actions">
+          <button class="btn-enable" id="perm-enable">Enable</button>
+          <button class="btn-later" id="perm-later">Later</button>
+        </div>
+        <div class="perm-dots" id="perm-dots"></div>
+      </div>
     </div>
+
+    <!-- OS root: the kernel takes over here (placeholder until milestone 2) -->
+    <div id="os-root" hidden>
+      <p id="boot-status">booting kernel…</p>
+    </div>
+
+    <script>
+      // ---------- starfield ----------
+      (() => {
+        const cv = document.getElementById("starfield");
+        const ctx = cv.getContext("2d");
+        const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+        let stars = [];
+        const make = () => {
+          cv.width = innerWidth * devicePixelRatio;
+          cv.height = innerHeight * devicePixelRatio;
+          const n = Math.min(420, (innerWidth * innerHeight) / 3200);
+          stars = Array.from({ length: n }, () => ({
+            x: Math.random() * cv.width,
+            y: Math.random() * cv.height,
+            z: 0.25 + Math.random() * 0.75,            // depth layer
+            p: Math.random() * Math.PI * 2,            // twinkle phase
+          }));
+        };
+        const draw = (t) => {
+          ctx.clearRect(0, 0, cv.width, cv.height);
+          for (const s of stars) {
+            const tw = reduced ? 0.75 : 0.55 + 0.45 * Math.sin(t / 900 + s.p);
+            const r = s.z * 1.6 * devicePixelRatio;
+            ctx.globalAlpha = tw * s.z;
+            ctx.fillStyle = s.z > 0.8 ? "#cfefff" : "#9fb4d8";
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, r, 0, 7);
+            ctx.fill();
+            if (!reduced) {
+              s.x -= s.z * 0.06 * devicePixelRatio;    // slow parallax drift
+              if (s.x < -2) s.x = cv.width + 2;
+            }
+          }
+          if (!reduced || !drawn) requestAnimationFrame(draw);
+          drawn = true;
+        };
+        let drawn = false;
+        addEventListener("resize", make);
+        make();
+        requestAnimationFrame(draw);
+      })();
+
+      // ---------- capability check + launch flow ----------
+      (() => {
+        const btn = document.getElementById("launch-btn");
+        const sub = document.getElementById("launch-sub");
+        const PERMS_KEY = "pmos.permissions.v1"; // TODO(M6): migrate to /sys/permissions in the VFS
+
+        if (!navigator.gpu) {
+          document.getElementById("no-webgpu").hidden = false;
+          btn.parentElement.hidden = true;
+          return;
+        }
+
+        // Trunk loads the WASM in the background while the visitor reads.
+        const ready = () => { btn.disabled = false; sub.textContent = "webgpu detected · core ready"; };
+        if (window.wasmBindings) ready();
+        else addEventListener("TrunkApplicationStarted", ready, { once: true });
+
+        // ---------- permission onboarding ----------
+        const steps = [
+          { key: "camera", ico: "📷", title: "Camera", why: "Hand-gesture control: point, pinch and grab to drive the OS. Frames never leave your machine — only hand landmarks are used.",
+            ask: async () => (await navigator.mediaDevices.getUserMedia({ video: true })).getTracks().forEach((t) => t.stop()) },
+          { key: "microphone", ico: "🎤", title: "Microphone", why: "Voice commands and voice notes: summon the palette and speak apps into existence.",
+            ask: async () => (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach((t) => t.stop()) },
+          { key: "notifications", ico: "🔔", title: "Notifications", why: "Timers, reminders and finished AI tasks can reach you outside the tab.",
+            ask: async () => { if ((await Notification.requestPermission()) !== "granted") throw 0; } },
+        ];
+        const ob = document.getElementById("onboarding");
+        const dots = document.getElementById("perm-dots");
+        dots.innerHTML = steps.map(() => "<span></span>").join("");
+
+        const runOnboarding = (results, i, done) => {
+          if (i >= steps.length) { ob.classList.remove("show"); setTimeout(() => { ob.hidden = true; done(results); }, 450); return; }
+          const s = steps[i];
+          document.getElementById("perm-ico").textContent = s.ico;
+          document.getElementById("perm-title").textContent = s.title;
+          document.getElementById("perm-why").textContent = s.why;
+          [...dots.children].forEach((d, j) => d.classList.toggle("on", j <= i));
+          const next = (granted) => { results[s.key] = granted; runOnboarding(results, i + 1, done); };
+          document.getElementById("perm-enable").onclick = async () => {
+            try { await s.ask(); next(true); } catch { next(false); }
+          };
+          document.getElementById("perm-later").onclick = () => next(false);
+        };
+
+        const boot = (perms) => {
+          localStorage.setItem(PERMS_KEY, JSON.stringify(perms));
+          document.getElementById("landing").classList.add("fade-out");
+          setTimeout(() => window.wasmBindings.pmos_launch(JSON.stringify(perms)), 900);
+        };
+
+        btn.onclick = () => {
+          const saved = localStorage.getItem(PERMS_KEY);
+          if (saved) return boot(JSON.parse(saved)); // returning user: straight to the desktop
+          ob.hidden = false;
+          requestAnimationFrame(() => ob.classList.add("show"));
+          runOnboarding({}, 0, boot);
+        };
+      })();
+    </script>
   </body>
 </html>
