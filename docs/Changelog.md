@@ -12,6 +12,17 @@ Entry format:
 
 ---
 
+## [2026-07-30] — Camera pipeline fixes (user bug report: "camera always off")
+### Code
+- **Root cause 1:** MediaPipe's wasm loader calls `importScripts()`, which module workers forbid — the hand-tracking model silently failed to load on every machine. Fixed with a synchronous-XHR + indirect-eval shim in `gesture-worker.js`.
+- **Root cause 2:** the capture `<video>` element was never attached to the DOM, so `video.play()` could be rejected ("media was removed from the document"). Now appended invisibly (opacity 0, 2×2 px — never `display:none`, which stalls frames).
+- **Failure visibility:** camera errors were silent. `CameraStatus` now carries a reason (ABI 1.2); the Hand Tracker shows it in orange with actionable guidance — permission blocked (padlock instructions), no device, camera in use, model load failure — plus "requesting camera…" / "loading model…" progress states.
+- **GPU fallback:** the worker falls back to the CPU delegate when the GPU delegate fails to initialize.
+- **Permission re-ask:** the landing page now shows "↺ re-ask permissions on launch" for returning users (clears the saved onboarding state) — fixes "it no longer asks for camera/mic/notifications".
+- Verified end-to-end in Chrome with a real webcam: onboarding re-runs after reset; Enable camera → live feed renders in the viewer; tray shows on/no-hands.
+### Specs
+- Behavior covered by [[UI]] §2.0 (permission control) and [[Hand Gestures]] §8; no spec text changes needed beyond this record.
+
 ## [2026-07-30] — Hand Tracker app (user request)
 ### Code
 - `pmos-apps/hand_tracker`: new dock app ✋ — window opens bottom-right with the mirrored camera preview, hand-skeleton overlay (bones + points per hand), privacy mode (feed toggle off = landmarks on black and the platform stops streaming pixels entirely), live pose/hand-count status, Enable-camera re-request, and detection settings (hands, MediaPipe confidences, smoothing preset, pinch enter/exit, reset).
