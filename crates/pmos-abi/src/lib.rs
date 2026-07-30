@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 3);
+pub const ABI_VERSION: (u16, u16) = (1, 4);
 
 // ---------- handles ----------
 
@@ -137,6 +137,11 @@ pub enum Syscall {
     // system
     SysQuery {
         path: String,
+    },
+    /// Configure the ray tracer (ABI 1.4). Requires `SysQuery`.
+    RtConfig {
+        bounces: u8,
+        animate: bool,
     },
 }
 

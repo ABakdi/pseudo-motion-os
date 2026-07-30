@@ -8,6 +8,7 @@
 pub mod ai;
 pub mod gfx;
 pub mod input;
+pub mod phys;
 pub mod proc;
 pub mod vfs;
 
@@ -47,6 +48,7 @@ pub struct Kernel {
     pub hands_directives: HandsDirectives,
     pub ai: ai::AiState,
     pub vfs: vfs::Vfs,
+    pub phys: phys::Physics,
     windows: HashMap<WinId, WinRecord>,
     next_win: u32,
     events: HashMap<Pid, Vec<KernelEvent>>,
@@ -68,6 +70,7 @@ impl Kernel {
             },
             ai: ai::AiState::default(),
             vfs: vfs::Vfs::new(),
+            phys: phys::Physics::new(),
             windows: HashMap::new(),
             next_win: 1,
             events: HashMap::new(),
@@ -131,6 +134,56 @@ impl Kernel {
             }
             self.publish_hand_state();
         }
+    }
+
+    /// Advance physics and render one frame (Architecture §7 steps 4+6).
+    pub fn render_frame(
+        &mut self,
+        primitives: &[egui::ClippedPrimitive],
+        textures_delta: &egui::TexturesDelta,
+        pixels_per_point: f32,
+        time: f32,
+        dt: f32,
+    ) {
+        self.phys.step(dt.min(0.25));
+        let instances = self.phys.instances();
+        if let Some(gfx) = self.gfx.as_mut() {
+            gfx.render(
+                primitives,
+                textures_delta,
+                pixels_per_point,
+                time,
+                &instances,
+            );
+        }
+    }
+
+    /// Try to grab a prop under the given screen position. Returns true if a
+    /// body was grabbed (else the caller falls back to camera orbit).
+    pub fn try_grab_prop(&mut self, pos: [f32; 2], viewport: [f32; 2]) -> bool {
+        let Some(gfx) = self.gfx.as_ref() else {
+            return false;
+        };
+        let (origin, dir) = gfx.screen_ray(pos, viewport);
+        if let Some((body, depth)) = self.phys.pick(origin, dir) {
+            self.phys.grab(body, depth);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move the grab target to the ray point at the stored grab depth.
+    pub fn move_grab(&mut self, pos: [f32; 2], viewport: [f32; 2]) {
+        let (Some(gfx), Some(depth)) = (self.gfx.as_ref(), self.phys.grab_depth()) else {
+            return;
+        };
+        let (origin, dir) = gfx.screen_ray(pos, viewport);
+        self.phys.grab_move(origin + dir * depth);
+    }
+
+    pub fn release_grab(&mut self) {
+        self.phys.release();
     }
 
     pub fn set_camera_status(&mut self, enabled: bool, reason: String) {
@@ -314,6 +367,14 @@ impl KernelApi for Kernel {
                             done: true,
                         },
                     );
+                }
+                Ok(Reply::None)
+            }
+            Syscall::RtConfig { bounces, animate } => {
+                self.require(caller, &Capability::SysQuery)?;
+                if let Some(gfx) = self.gfx.as_mut() {
+                    gfx.rt_bounces = bounces.clamp(1, 5);
+                    gfx.rt_animate = animate;
                 }
                 Ok(Reply::None)
             }
