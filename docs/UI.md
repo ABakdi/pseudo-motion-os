@@ -9,7 +9,7 @@ How the user interface works: the shell elements that exist, how they behave, an
 
 PMOS UI exists on two composited planes:
 
-1. **The Stage (3D plane)** — a persistent 3D room/space rendered behind everything: a ground plane, ambient props, physics objects, and any windows the user has *pinned into space*. The stage has a camera with a default "desk view"; the user can orbit/zoom it (two-hand gestures or mouse) but there is always a one-action "reset view".
+1. **The Stage (3D plane)** — a persistent 3D space rendered behind everything: a ground plane, ambient props, physics objects, floating app icons (§2.8), and any windows the user has *pinned into space*. The stage is wrapped in a **distant galaxy**: a procedural starfield/nebula rendered at infinite depth (a fullscreen shader driven by view *rotation only*, so no amount of zooming or moving ever brings it closer — it is the unreachable horizon that gives the space its sense of scale). It drifts and twinkles slowly; it is scenery, not geometry. The stage camera has a default "desk view"; the user can orbit/zoom it (mouse drag/wheel, two-hand gestures) within clamped zoom limits, and there is always a one-action "reset view" (`Home` / double-click empty space).
 2. **The Overlay (2D plane)** — classic flat UI rendered on top: floating windows, dock, palette, notifications, cursors. This is where work happens by default; the stage is where things become spatial when it helps (presenting, arranging, playing).
 
 A window can move between planes at any time ("pin to stage" / "bring to overlay"). Because every window renders into its own texture ([[Architecture]]), this is a cheap re-parenting, not a rewrite.
@@ -19,6 +19,15 @@ A window can move between planes at any time ("pin to stage" / "bring to overlay
 ---
 
 ## 2. Shell Elements
+
+### 2.0 Boot & Launch experience
+The OS is entered through a deliberate, cinematic sequence:
+
+1. **Home page** — a plain HTML/CSS landing page (instant paint, zero WASM): full-viewport hero with the animated PMOS logomark over a starfield backdrop, one-line pitch, and a single **Launch** call-to-action; feature highlights below. If WebGPU is missing, the Launch button is replaced by a friendly capability notice — the landing page itself works everywhere.
+2. **Launch** — clicking Launch boots the WASM kernel (progress shown on the button itself), then runs **permission onboarding**: sequential cards for **camera** (hand gestures), **microphone** (voice), and **notifications**, each with a one-line reason and `Enable` / `Later`. Browser permission prompts fire from these explicit clicks (user-gesture requirement); anything skipped is re-requested on first relevant use. Onboarding state persists to `/sys/permissions`, so returning users go straight to the desktop.
+3. **Arrival** — a fade from the landing page into the Stage: the galaxy backdrop, the floating system app icons, and the dock. The OS is live.
+
+**Why a landing page at all:** PMOS is also its own advertisement — the first impression is part of the product, and keeping it WASM-free means it loads instantly and degrades gracefully.
 
 ### 2.1 Windows
 - Standard chrome: title, drag region, minimize / close, resize handles (all corners+edges). Minimum useful hit targets: 32 px (larger tolerance when the pointer source is a hand — see §4).
@@ -46,6 +55,9 @@ Toast stack top-right: app messages, AI task completions, capability consent pro
 
 ### 2.7 Context Menus
 Right-click / *middle-finger-pinch* opens context menus on windows, files, stage objects. Every context action also exists in the command palette (discoverability rule: **nothing is context-menu-only**).
+
+### 2.8 Floating app icons
+The system applications (Terminal, Files, Notes, Settings, Browser) live **in the Stage** as glowing, gently bobbing billboard icons arranged in the space in front of the default camera — the desktop's furniture. Hover (pointer or hand-point) brightens the icon and fades in its label; click/pinch opens the app's window in the overlay. Icons are grabbable (✊) and re-arrangeable; their placement persists per user. The dock (§2.2) mirrors the same apps for flat, fast access — the stage icons are the spatial, presentational path; the dock is the productivity path (two-plane philosophy, §1).
 
 ---
 
@@ -86,11 +98,26 @@ Virtual desktops each with their own overlay window set but **sharing one stage*
 
 When the active pointer source is a hand:
 - Hit targets gain a +8 px tolerance ring; small controls magnify on hover-dwell.
-- The cursor renders as an open ring that closes as pinch confidence rises (pre-touch feedback — users feel the click *coming*).
 - Dwell (800 ms) acts as hover; dwell-progress ring shown.
 - Snap: near-window-edge drags snap to halves/quarters (more aggressive snapping than with a mouse).
 
-When source is mouse: standard precise cursor, no magnification.
+**The morphing cursor.** With a hand as the source, the cursor is not an arrow — it is a live glyph that mirrors the recognized pose ([[Hand Gestures#3]]), so the user always sees what the system sees:
+
+| Hand state | Cursor form |
+|---|---|
+| Rest / Point | open ring with a center dot |
+| Pinch forming | ring tightens continuously with pinch confidence (pre-touch feedback — you feel the click coming) |
+| Pinch (click/drag) | ring closed to a solid dot; drag draws a short motion trail |
+| Grab ✊ | fist glyph; grabbed object highlighted and tethered by a faint line |
+| Open palm | palm bloom (radial pulse) counting down the launcher hold |
+| 🤙 Call sign | microphone glyph; pulsing red while a voice note records |
+| Thumbs up/down | ✓ / ✕ badge flashed at the focused dialog |
+| Hover over interactive element | ring gains a soft halo |
+| Tracking lost | cursor frozen, dimmed, slow blink until the hand returns |
+
+Cursor forms are drawn in the overlay pass at 60 FPS from recognizer state — never from raw landmarks — so the glyph is always consistent with what the input pipeline will actually do.
+
+When source is mouse: standard precise cursor, no magnification, no morphing.
 
 ---
 

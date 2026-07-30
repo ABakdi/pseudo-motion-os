@@ -171,10 +171,10 @@ WASM threads require SharedArrayBuffer, which requires cross-origin isolation (C
 ## 9. Interfacing with the Browser and the Actual OS
 
 ### 9.1 Pure browser mode
-- **Boot sequence:** static page loads → WebGPU capability check (friendly failure screen if absent) → WASM instantiated → platform bridge spawns workers → kernel init (gfx device, VFS mount, input) → shell process starts → desktop appears. Target: interactive < 3 s on a warm cache.
+- **Boot sequence:** static landing page loads (plain HTML/CSS — instant, WASM-free; see [[UI#2.0 Boot & Launch experience]]) → WebGPU capability check (friendly notice replaces the Launch button if absent) → user clicks **Launch** → WASM instantiated → platform bridge spawns workers → kernel init (gfx device, VFS mount, input) → permission onboarding (camera/mic/notifications, each skippable; first run only) → shell process starts → desktop appears. Target: interactive < 3 s after Launch on a warm cache.
 - **The page is the machine:** one canvas, fullscreen layout; browser chrome (back button, refresh) is handled — state persists via VFS, `beforeunload` flushes writes.
 - **Security context:** HTTPS required (WebGPU, getUserMedia, OPFS are secure-context APIs). CORS governs all fetches; the Anthropic API is called directly from the browser with its CORS opt-in header ([[AI System#Providers]]).
-- **Permissions UX:** camera and mic permission prompts are browser-native; PMOS requests them lazily (first gesture-feature use, first voice use), never at boot.
+- **Permissions UX:** camera, mic, and notification prompts are browser-native and must fire from explicit user clicks; PMOS requests them during post-Launch onboarding via per-permission `Enable`/`Later` cards, and re-requests skipped ones lazily on first relevant use (first gesture feature, first voice use).
 
 ### 9.2 Tauri desktop mode
 - The identical WASM bundle runs in Tauri's webview (WebGPU support required in the platform webview; where missing, Tauri can fall back to bundling a compatible runtime — evaluate at milestone 0).
