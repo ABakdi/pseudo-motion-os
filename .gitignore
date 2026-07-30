@@ -1,0 +1,10 @@
+# Obsidian workspace state (per-user, churns constantly)
+docs/.obsidian/workspace.json
+docs/.obsidian/workspace-mobile.json
+docs/.obsidian/cache/
+
+# Rust / WASM build artifacts (for when the code lands)
+target/
+dist/
+*.wasm
+node_modules/
