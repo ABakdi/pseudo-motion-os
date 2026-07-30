@@ -12,6 +12,12 @@ Entry format:
 
 ---
 
+## [2026-07-30] — Fix: opening the Hand Tracker froze all hand tracking (user bug report)
+### Code
+- **Root cause:** opening the viewer sent a `configure` to the gesture worker on every directives change, which rebuilt the MediaPipe landmarker; frames arriving mid-rebuild were dropped *without a reply*, wedging the main thread's `busy` flag forever — tracking, cursor and preview all froze until a full restart.
+- `gesture.js`: configure only rebuilds when worker-side tuning (hands/confidences) actually changed — viewer open/close and feed toggles never interrupt tracking; 2 s watchdog recovers a lost reply; the preview stream no longer depends on the worker round-trip.
+- `gesture-worker.js`: hard contract — every frame message gets a reply (zero hands when dropped or on detect failure); configure failures report instead of dying silently.
+
 ## [2026-07-30] — Camera pipeline fixes (user bug report: "camera always off")
 ### Code
 - **Root cause 1:** MediaPipe's wasm loader calls `importScripts()`, which module workers forbid — the hand-tracking model silently failed to load on every machine. Fixed with a synchronous-XHR + indirect-eval shim in `gesture-worker.js`.
