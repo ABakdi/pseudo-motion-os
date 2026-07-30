@@ -74,6 +74,9 @@
                     box-shadow: 0 0 34px var(--accent-glow), 0 0 90px rgba(192, 132, 252, .18); }
       #launch-btn:disabled { opacity: .55; cursor: progress; }
       #launch-sub { font-size: .78rem; color: var(--ink-dim); letter-spacing: .08em; }
+      #perm-reset { background: none; border: none; cursor: pointer; font-size: .75rem;
+                    color: var(--ink-dim); text-decoration: underline dotted; padding: 0; }
+      #perm-reset:hover { color: var(--accent-a); }
       #no-webgpu { max-width: 34rem; margin: 1.4rem auto 0; padding: 1rem 1.3rem; border-radius: var(--radius);
                    background: rgba(255, 107, 129, .08); border: 1px solid rgba(255, 107, 129, .35);
                    color: var(--ink); font-size: .92rem; line-height: 1.55; }
@@ -162,6 +165,7 @@
         <div class="cta">
           <button id="launch-btn" disabled>LAUNCH</button>
           <span id="launch-sub">loading core…</span>
+          <button id="perm-reset" hidden>↺ re-ask camera/mic/notification permissions on launch</button>
         </div>
         <div id="no-webgpu" hidden>
           <strong>This browser can't run Pseudo Motion OS.</strong><br />
@@ -272,6 +276,16 @@
         const ready = () => { btn.disabled = false; sub.textContent = "webgpu detected · core ready"; };
         if (window.wasmBindings) ready();
         else addEventListener("TrunkApplicationStarted", ready, { once: true });
+
+        // Returning users skip onboarding; this link opts back into it
+        // (UI spec §2.0 — permission choices must stay user-controllable).
+        const resetBtn = document.getElementById("perm-reset");
+        resetBtn.hidden = !localStorage.getItem(PERMS_KEY);
+        resetBtn.onclick = () => {
+          localStorage.removeItem(PERMS_KEY);
+          resetBtn.hidden = true;
+          sub.textContent = "permissions will be asked on launch";
+        };
 
         // ---------- permission onboarding ----------
         const steps = [
