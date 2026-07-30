@@ -20,15 +20,15 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 - [x] **Verification** — `cargo check --workspace` (native + wasm32) green; `cargo test` green.
 - [x] **README** with dev instructions and crate map.
 
-## M1 — Landing & Launch Experience
+## M1 — Landing & Launch Experience ✅
 *Goal: visitor opens the URL → impressive home page with logo → presses Launch → grants permissions → arrives on the desktop. The landing page is plain HTML/CSS (instant paint, works even without WebGPU); WASM boots on Launch.*
 
-- [ ] **Logo & identity** — PMOS logomark (SVG, animatable), wordmark, color tokens shared between landing CSS and egui theme. *(Spec: [[UI#2.0 Boot & Launch experience]])*
-- [ ] **Home page** — full-viewport hero: animated starfield/nebula CSS-or-canvas backdrop, logo, one-line pitch, **Launch** call-to-action; feature blurbs (gestures, AI conjuring, 3D space) beneath; graceful "browser not supported" state when WebGPU is absent (check already implemented in M0).
-- [ ] **Launch flow** — Launch click → WASM boot (loading progress on the button itself) → **permission onboarding**:
-    - [ ] Sequential permission cards: camera (gestures), microphone (voice), notifications — each with a one-line why, `Enable` / `Later` (browser prompts must be user-gesture-driven; skipped ones re-request on first relevant use).
-    - [ ] Permission state persisted to `/sys/permissions` so onboarding shows only once.
-- [ ] **Transition** — cinematic fade from landing into the 3D desktop (M2 provides the desktop; until then, a dark "kernel ready" scene).
+- [x] **Logo & identity** — PMOS logomark (animated SVG: core dot with two counter-orbiting gradient arcs), gradient wordmark, design tokens as CSS variables (to be mirrored in the egui theme at M2). *(Spec: [[UI#2.0 Boot & Launch experience]])*
+- [x] **Home page** — full-viewport hero: canvas starfield (3 depth layers, twinkle + parallax drift, reduced-motion aware) + animated nebula glows, logo, tagline, **LAUNCH** CTA (enabled when the core loads, glow on hover); three feature cards; footer; "browser not supported" notice replaces the CTA when WebGPU is absent.
+- [x] **Launch flow** — Launch click → onboarding → fade → `pmos_launch(permissions)` boots the kernel:
+    - [x] Sequential permission cards (camera 📷 / microphone 🎤 / notifications 🔔) with reason lines, `Enable`/`Later`, progress dots; browser prompts fire from the explicit Enable click.
+    - [x] Permission state persisted (localStorage for now — migrates to `/sys/permissions` when the VFS lands in M6); returning users skip onboarding entirely. *(verified in Chrome)*
+- [x] **Transition** — landing fades out (0.9 s) into the OS root; kernel constructs and reports ABI v1.0 (real desktop arrives in M2). *(verified end-to-end in Chrome, including console logs)*
 
 ## M2 — Desktop: 3D Space, Galaxy, App Icons
 *Goal: the OS desktop — a 3D space wrapped in a distant galaxy that can never be reached, floating app icons that open windows, full mouse/keyboard control.*

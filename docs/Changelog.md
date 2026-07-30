@@ -12,6 +12,15 @@ Entry format:
 
 ---
 
+## [2026-07-30] — Milestone 1: Landing & launch experience
+### Code
+- `pmos-web/index.html`: full landing page — animated SVG logomark (counter-orbiting gradient arcs), gradient wordmark, canvas starfield (3 depth layers, twinkle, parallax drift, `prefers-reduced-motion` aware), nebula glows, LAUNCH CTA that enables when the WASM core loads, feature cards, WebGPU-unsupported notice, design tokens as CSS variables.
+- Permission onboarding: sequential camera/mic/notifications cards with Enable/Later and progress dots; results persisted (localStorage until the VFS lands, then `/sys/permissions`); returning users skip straight to boot.
+- `pmos-web/src/main.rs`: page load stays lightweight; `pmos_launch(permissions_json)` exported to the page boots the kernel and swaps landing → OS root.
+- Verified end-to-end in Chrome: landing render, onboarding flow, kernel boot (ABI 1.0 logged), returning-user skip path.
+### Specs
+- [[Todo]]: M1 marked done with verification notes.
+
 ## [2026-07-30] — Milestone 0: Rust workspace scaffolded; roadmap and launch-experience specs
 ### Code
 - Created the cargo workspace with the six crates from Architecture §10: `pmos-abi` (syscall/event/capability types, ABI v1.0), `pmos-kernel` (Kernel root + subsystem stubs), `pmos-platform` (all web-sys interop; WebGPU boot check via `Reflect`), `pmos-apps` (userland, ABI-only by crate graph), `pmos-conjure` (validator skeleton with machine-readable errors + 3 tests), `pmos-web` (trunk entry, placeholder page).
