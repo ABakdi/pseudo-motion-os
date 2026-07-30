@@ -13,6 +13,8 @@ pub struct HandCursor {
     pub hands: u8,
     pub camera_enabled: bool,
     pub camera_reason: String,
+    /// Time of the last pinch onset — drives the click ripple (UI spec §6).
+    pub last_pinch: f64,
 }
 
 impl HandCursor {
@@ -25,6 +27,7 @@ impl HandCursor {
             hands: 0,
             camera_enabled: false,
             camera_reason: String::new(),
+            last_pinch: -10.0,
         }
     }
 
@@ -57,6 +60,16 @@ impl HandCursor {
             .interactable(false)
             .show(ctx, |ui| {
                 let p = ui.painter();
+                // Click ripple: expanding fading ring after a pinch onset.
+                let since = (ctx.input(|i| i.time) - self.last_pinch) as f32;
+                if (0.0..0.35).contains(&since) {
+                    let k = since / 0.35;
+                    p.circle_stroke(
+                        center,
+                        10.0 + 42.0 * k,
+                        egui::Stroke::new(2.0 * (1.0 - k), theme::ACCENT_A.gamma_multiply(1.0 - k)),
+                    );
+                }
                 if !self.tracking {
                     // Frozen + dim + slow blink until the hand returns.
                     let a = 0.25 + 0.15 * (t * 2.0).sin().abs();
