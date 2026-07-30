@@ -43,15 +43,16 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 - [x] **Keyboard & mouse** — winit events → egui first, unconsumed input drives the camera; pointer moves flow through the kernel input pipeline with source tags (fusion foundation for M3).
 - *Known quirk for M4:* releasing a camera-orbit drag over an icon can register as a click — proper press-origin routing arrives with the M4 input work.
 
-## M3 — Camera & Hand Gesture Detection
+## M3 — Camera & Hand Gesture Detection ✅
 *Goal: webcam on, hands tracked, gestures recognized — and a living cursor that morphs with the hand.*
 
-- [ ] **Gesture worker** — JS worker: getUserMedia → MediaPipe `tasks-vision` HandLandmarker (GPU delegate) → landmark frames → WASM. Camera frames never leave the worker (privacy boundary). *(Spec: [[Architecture#3]], [[Hand Gestures#2]])*
-- [ ] **Landmark ingestion** — One-Euro filtering, control-box mapping to screen space, confidence gating (freeze, never jump).
-- [ ] **Pose classifier** — rule-based static poses: Point, Pinch, MiddlePinch, Grab, OpenPalm, TwoFinger, CallSign, ThumbsUp/Down, Rest. *(Spec: [[Hand Gestures#3]])*
-- [ ] **Temporal layer** — hold-times, tap-vs-hold (🤙), swipe velocity detection, hysteresis thresholds; all tunables in one config struct. *(Spec: [[Hand Gestures#6]])*
-- [ ] **Morphing cursor** — the signature cursor: not an arrow but a **shape-shifting glyph** rendered in the overlay pass — open ring (rest/point) that tightens as pinch confidence rises, closes to a dot on click, becomes a fist glyph while grabbing, a palm bloom for launcher, a mic glyph in 🤙 mode; color/size states for hover, tracking-lost (frozen+dim). *(Spec: [[UI#4. Pointer-Source Adaptation]])*
-- [ ] **Camera status UI** — tray indicator (on/off/hands-detected), first-run calibration screen (control box + pinch distance). *(Spec: [[Hand Gestures#6]])*
+- [x] **Gesture pipeline** — video capture on the main thread (getUserMedia is worker-unavailable — spec corrected), ImageBitmap transfer to the JS gesture worker running MediaPipe `tasks-vision` HandLandmarker (GPU delegate, 2 hands, camera-paced via `requestVideoFrameCallback`); landmarks → WASM bridge → kernel. Only landmarks cross into the kernel. *(Spec: [[Architecture#3]], [[Hand Gestures#2]])*
+- [x] **Landmark ingestion** — One-Euro filtering (Balanced preset), control-box mapping with x-mirror, tracking-loss timeout (0.5 s → cursor freezes, never jumps).
+- [x] **Pose classifier** — rule-based on landmark topology: Point, Pinch, MiddlePinch, Grab, OpenPalm, TwoFinger, CallSign, ThumbsUp/Down, Rest; pinch hysteresis (enter 0.35 / exit 0.55 × palm scale) and frame debouncing; unit-tested. *(Spec: [[Hand Gestures#3]])*
+- [~] **Temporal layer** — hysteresis + debounce done; tap-vs-hold (🤙), swipe velocity and the shell-gesture routing land with **M4** (they only matter once gestures control things).
+- [x] **Morphing cursor** — ring + dot (rest/point) tightening with pinch progress, solid dot (pinch, accent-B for middle-pinch), ✊ grab glyph, ✋ palm bloom pulse, voice ring with pulsing red core (call sign), 👍/👎 badges, frozen dim blink on tracking loss. Delivered to the shell via new ABI 1.1 events (`HandUpdate`, `CameraStatus`). *(Spec: [[UI#4]])*
+- [x] **Camera status UI** — tray indicator: 📷 off / on · no hands / tracking · N hands. First-run calibration screen deferred to **M5** (Settings app).
+- *Verified in Chrome:* camera-denied degradation (tray 📷 off, zero errors) and the full pipeline via synthetic landmark injection through the real JS→WASM bridge — Point ring, Grab fist, tracking-lost freeze all rendered; classifier covered by native unit tests. **Live-webcam testing needs a machine with a camera — user to confirm.*
 
 ## M4 — Gesture Control
 *Goal: operate the whole desktop by hand: click, open, move, throw.*

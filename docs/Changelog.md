@@ -12,6 +12,17 @@ Entry format:
 
 ---
 
+## [2026-07-30] — Milestone 3: hand tracking and the morphing cursor
+### Code
+- `pmos-web/gesture.js` + `gesture-worker.js`: capture pipeline — getUserMedia on the main thread (unavailable in workers), ImageBitmap transfer to a module worker running MediaPipe tasks-vision HandLandmarker (GPU delegate, ≤2 hands), camera-paced via requestVideoFrameCallback; landmarks posted back as flat Float32Arrays into the WASM bridge (`pmos_hands_frame` / `pmos_camera_status`).
+- `pmos-kernel/input/hands`: One-Euro filter, control-box mapping (x-mirrored), rule-based pose classifier (9 poses + Rest) with pinch hysteresis and frame debouncing, 0.5 s tracking-loss freeze; 4 unit tests.
+- `pmos-abi` 1.1: `KernelEvent::HandUpdate { pose, pinch, pos, tracking, hands }` and `CameraStatus`; replaced the placeholder `HandPoseChanged`.
+- `pmos-apps/cursor`: the morphing cursor — ring tightening with pinch progress, pinch dot, ✊ / ✋ bloom / voice-pulse / 👍 👎 glyphs, frozen dim ring on tracking loss; tray camera indicator in the shell.
+- Verified in Chrome: camera-denied path, plus the full pipeline via synthetic landmark injection through the real JS bridge (Point ring, Grab fist, tracking-lost freeze). Live webcam pending user hardware.
+### Specs
+- [[Architecture]] §3 and [[Hand Gestures]] §2/§7 corrected: video capture is main-thread (getUserMedia is worker-unavailable); privacy boundary restated precisely.
+- [[Todo]]: M3 done; calibration screen moved to M5 (Settings); temporal tap/hold/swipe layer moved to M4 where it becomes meaningful.
+
 ## [2026-07-30] — Removed floating stage icons (user decision)
 ### Specs
 - [[UI]] §2.8 rewritten: the dock and launcher are the app-launching surfaces; the Stage is reserved for content, not chrome. Stage/arrival descriptions updated; [[Todo]] M2 annotated.

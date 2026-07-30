@@ -49,7 +49,7 @@ All JavaScript interop lives in one crate, `pmos-platform`. Nothing outside it m
 
 - `GpuSurface` — canvas acquisition, resize events, `requestAnimationFrame` scheduling (via winit).
 - `StorageBackend` — async byte-level file ops, implemented by an **OPFS worker** (sync access handles are worker-only, which is why this worker exists) with an IndexedDB implementation as fallback.
-- `CameraTracker` — spawns the **gesture worker** (JS): getUserMedia → MediaPipe `HandLandmarker` (GPU delegate) → landmark frames posted to WASM as compact `Float32Array`s. The worker owns the camera; the kernel only ever sees landmarks — a privacy boundary as much as an architectural one.
+- `CameraTracker` — the hand-tracking pipeline. Video capture lives on the **main thread** (`getUserMedia` is unavailable inside workers); frames are transferred as `ImageBitmap`s to the **gesture worker** (JS), which runs MediaPipe `HandLandmarker` (GPU delegate) and posts landmark frames back as compact `Float32Array`s. Camera pixels never reach the kernel — only landmarks cross the WASM boundary; a privacy boundary as much as an architectural one.
 - `SpeechIn` — Web Speech API wrapper (interim + final transcripts) with a feature flag for a future Whisper worker.
 - `HttpClient` — fetch wrapper with streaming (SSE) support for LLM responses.
 - `NativeHost` (Tauri only) — `invoke()` bridge for native FS mounts and child-webview control; a no-op stub in pure browser mode.

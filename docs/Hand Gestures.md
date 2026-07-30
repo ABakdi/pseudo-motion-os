@@ -20,7 +20,8 @@ The complete gesture vocabulary: what each gesture does, why it was chosen, and 
 ## 2. Recognition pipeline
 
 ```
-camera (getUserMedia, gesture worker)
+camera (getUserMedia, main thread — unavailable in workers)
+  → ImageBitmap transfer → gesture worker
   → MediaPipe HandLandmarker (21 landmarks × ≤2 hands, GPU delegate, ~30 fps)
   → One-Euro filter per landmark (jitter removal, low latency)
   → feature extraction (fingertip distances, finger extension states, palm normal, velocity)
@@ -93,7 +94,7 @@ First-run includes a 60-second **calibration & tutorial**: control-box fit, pinc
 - **Tracking lost:** cursor freezes (never jumps), hint after 500 ms, mouse takes over instantly if moved (source fusion).
 - **Ambiguity:** unresolved poses do nothing (rest-is-neutral). Misfire correction: any gesture-initiated action within the toast window is undoable ([[UI#5. Consent & Safety UI]]).
 - **Fatigue guard:** if hands are actively controlling for > 10 continuous minutes, a subtle rest suggestion appears (dismissable, off by default in presentation mode).
-- **Privacy:** camera frames never leave the gesture worker; only landmarks cross into the kernel ([[Architecture#3. Layer 1 — Platform Bridge]]). A hardware-style on/off indicator lives in the system tray at all times.
+- **Privacy:** camera frames exist only in the capture element and the gesture worker's inference call; only landmarks cross into the kernel, and nothing camera-derived is ever stored or transmitted ([[Architecture#3. Layer 1 — Platform Bridge]]). A status indicator (off / on / tracking) lives in the system tray at all times.
 
 ---
 
