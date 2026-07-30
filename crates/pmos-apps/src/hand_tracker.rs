@@ -250,8 +250,11 @@ impl HandTrackerState {
                 }
             });
 
-        // Push tuning changes through the ABI once they settle.
+        // Push tuning changes through the ABI only once the user releases the
+        // control — sending mid-drag would rebuild the landmarker for every
+        // intermediate slider value and interrupt tracking dozens of times.
         if self.tuning != self.sent_tuning
+            && !ui.ctx().input(|i| i.pointer.any_down())
             && kernel.syscall(pid, Syscall::HandsTune(self.tuning)).is_ok()
         {
             self.sent_tuning = self.tuning;
