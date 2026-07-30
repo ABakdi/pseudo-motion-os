@@ -46,6 +46,7 @@ pub struct Kernel {
     pub gfx: Option<gfx::Gfx>,
     pub hands_directives: HandsDirectives,
     pub ai: ai::AiState,
+    pub vfs: vfs::Vfs,
     windows: HashMap<WinId, WinRecord>,
     next_win: u32,
     events: HashMap<Pid, Vec<KernelEvent>>,
@@ -66,6 +67,7 @@ impl Kernel {
                 generation: 0,
             },
             ai: ai::AiState::default(),
+            vfs: vfs::Vfs::new(),
             windows: HashMap::new(),
             next_win: 1,
             events: HashMap::new(),
@@ -156,6 +158,21 @@ impl Kernel {
         self.events.entry(pid).or_default().push(ev);
     }
 
+    /// Scoped filesystem capability check: the caller must hold an
+    /// FsRead/FsWrite whose scope prefixes the requested path.
+    fn require_fs(&self, caller: Pid, path: &str, write: bool) -> Result<(), ErrorCode> {
+        if self.procs.has_fs_cap(caller, path, write) {
+            Ok(())
+        } else {
+            log::warn!(
+                "fs capability denied for {caller:?}: {} {}",
+                if write { "write" } else { "read" },
+                path
+            );
+            Err(ErrorCode::CapabilityDenied)
+        }
+    }
+
     fn require(&self, caller: Pid, cap: &Capability) -> Result<(), ErrorCode> {
         if self.procs.has_cap(caller, cap) {
             Ok(())
@@ -233,7 +250,50 @@ impl KernelApi for Kernel {
             }
             Syscall::SysQuery { path } => {
                 self.require(caller, &Capability::SysQuery)?;
-                log::debug!("sys query: {path} (synthetic /sys lands in M6)");
+                match self.vfs.read(&path) {
+                    Some(bytes) => Ok(Reply::Bytes(bytes)),
+                    None => Err(ErrorCode::NotFound),
+                }
+            }
+            Syscall::FsRead { path } => {
+                self.require_fs(caller, &path, false)?;
+                match self.vfs.read(&path) {
+                    Some(bytes) => Ok(Reply::Bytes(bytes)),
+                    None => Err(ErrorCode::NotFound),
+                }
+            }
+            Syscall::FsList { path } => {
+                self.require_fs(caller, &path, false)?;
+                match self.vfs.list(&path) {
+                    Some(entries) => Ok(Reply::Entries(entries)),
+                    None => Err(ErrorCode::NotFound),
+                }
+            }
+            Syscall::FsWrite { path, bytes } => {
+                self.require_fs(caller, &path, true)?;
+                self.vfs.write(&path, bytes).map_err(|e| {
+                    log::warn!("fs write failed: {e}");
+                    ErrorCode::InvalidArgument
+                })?;
+                self.push_event(proc::SHELL_PID, KernelEvent::FsChanged { path });
+                Ok(Reply::None)
+            }
+            Syscall::FsDelete { path } => {
+                self.require_fs(caller, &path, true)?;
+                self.vfs.delete(&path).map_err(|e| {
+                    log::warn!("fs delete failed: {e}");
+                    ErrorCode::InvalidArgument
+                })?;
+                self.push_event(proc::SHELL_PID, KernelEvent::FsChanged { path });
+                Ok(Reply::None)
+            }
+            Syscall::FsMkdir { path } => {
+                self.require_fs(caller, &path, true)?;
+                self.vfs.mkdir(&path).map_err(|e| {
+                    log::warn!("fs mkdir failed: {e}");
+                    ErrorCode::InvalidArgument
+                })?;
+                self.push_event(proc::SHELL_PID, KernelEvent::FsChanged { path });
                 Ok(Reply::None)
             }
             Syscall::AiConfigure(cfg) => {

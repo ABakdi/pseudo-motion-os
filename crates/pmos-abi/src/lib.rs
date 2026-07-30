@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 2);
+pub const ABI_VERSION: (u16, u16) = (1, 3);
 
 // ---------- handles ----------
 
@@ -89,6 +89,12 @@ pub enum Syscall {
         path: String,
     },
     FsWatch {
+        path: String,
+    },
+    FsDelete {
+        path: String,
+    },
+    FsMkdir {
         path: String,
     },
     // input
@@ -270,6 +276,14 @@ pub enum ErrorCode {
     Unsupported,
 }
 
+/// A directory listing entry (ABI 1.3).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirEntry {
+    pub name: String,
+    pub dir: bool,
+    pub size: u64,
+}
+
 /// Synchronous syscall replies. v1 dispatches in-memory so cheap syscalls
 /// answer directly; results that take time (I/O, AI) still arrive as
 /// [`KernelEvent`]s — see Architecture §6 ("async by default").
@@ -278,6 +292,8 @@ pub enum Reply {
     None,
     Pid(Pid),
     Win(WinId),
+    Bytes(Vec<u8>),
+    Entries(Vec<DirEntry>),
 }
 
 /// The kernel as seen from userland. `pmos-apps` receives `&mut dyn KernelApi`

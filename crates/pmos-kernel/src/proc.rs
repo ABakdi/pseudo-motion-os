@@ -30,7 +30,14 @@ pub fn shell_caps() -> Vec<Capability> {
         Capability::NotesRead,
         Capability::InputRawHands,
         Capability::AiPrompt,
+        Capability::FsRead("/".into()),
+        Capability::FsWrite("/".into()),
     ]
+}
+
+fn scope_matches(scope: &str, path: &str) -> bool {
+    let scope = scope.trim_end_matches('/');
+    scope.is_empty() || path == scope || path.starts_with(&format!("{scope}/"))
 }
 
 pub struct ProcessTable {
@@ -72,6 +79,19 @@ impl ProcessTable {
 
     pub fn has_cap(&self, pid: Pid, cap: &Capability) -> bool {
         self.procs.get(&pid).is_some_and(|p| p.caps.contains(cap))
+    }
+
+    /// Scoped filesystem check: any held FsRead/FsWrite whose scope is a
+    /// path-prefix of `path` grants access (write implies read).
+    pub fn has_fs_cap(&self, pid: Pid, path: &str, write: bool) -> bool {
+        let Some(p) = self.procs.get(&pid) else {
+            return false;
+        };
+        p.caps.iter().any(|c| match c {
+            Capability::FsWrite(scope) => scope_matches(scope, path),
+            Capability::FsRead(scope) if !write => scope_matches(scope, path),
+            _ => false,
+        })
     }
 
     pub fn grant(&mut self, pid: Pid, caps: Vec<Capability>) {
