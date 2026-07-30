@@ -5,18 +5,39 @@ const VISION = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 const MODEL =
   "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
+// MediaPipe's wasm loader still calls importScripts(), which module workers
+// forbid — shim it with synchronous XHR + indirect eval (global scope).
+globalThis.importScripts = (...urls) => {
+  for (const url of urls) {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", url, false);
+    xhr.send();
+    if (xhr.status < 200 || xhr.status >= 300) {
+      throw new Error("importScripts shim failed for " + url);
+    }
+    (0, eval)(xhr.responseText);
+  }
+};
+
 let landmarker = null;
 let fileset = null;
 let makeLandmarker = null;
 
 async function build(opts = {}) {
-  landmarker = await makeLandmarker(fileset, {
-    baseOptions: { modelAssetPath: MODEL, delegate: "GPU" },
+  const cfg = (delegate) => ({
+    baseOptions: { modelAssetPath: MODEL, delegate },
     runningMode: "VIDEO",
     numHands: opts.numHands ?? 2,
     minHandDetectionConfidence: opts.detConf ?? 0.5,
     minTrackingConfidence: opts.trackConf ?? 0.5,
   });
+  try {
+    landmarker = await makeLandmarker(fileset, cfg("GPU"));
+  } catch (e) {
+    // Some machines/browsers can't create the GPU delegate — fall back.
+    console.warn("[pmos gesture-worker] GPU delegate failed, using CPU:", e);
+    landmarker = await makeLandmarker(fileset, cfg("CPU"));
+  }
 }
 
 (async () => {
