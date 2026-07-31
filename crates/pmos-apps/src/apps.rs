@@ -113,6 +113,9 @@ pub struct AppState {
     notes_new_name: String,
     notes_status: String,
     notes_backlinks: Vec<String>,
+    // browser
+    browser_input: String,
+    browser_url: String,
     // ray tracer
     rt_bounces: u8,
     rt_animate: bool,
@@ -140,6 +143,8 @@ impl AppState {
             notes_new_name: String::new(),
             notes_status: String::new(),
             notes_backlinks: Vec::new(),
+            browser_input: "https://en.wikipedia.org".to_string(),
+            browser_url: String::new(),
             rt_bounces: 3,
             rt_animate: true,
             ai_kind: 0,
@@ -164,14 +169,44 @@ impl AppState {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        match self.kind {
-            AppKind::Browser => {
-                ui.label("The browser app lands in milestone 8.");
-                ui.weak("(iframe browsing in web mode, native webviews under Tauri)");
+        ui.weak("this app is shell-drawn");
+    }
+
+    // ---------------- browser ----------------
+
+    /// The nested browser (UI heritage §4.8): the chrome is egui; the page
+    /// itself is a real DOM iframe the platform overlays on the content rect
+    /// returned here. Honest caveat surfaced in the UI: many sites refuse to
+    /// be iframed (X-Frame-Options/CSP) — real browsing arrives with Tauri's
+    /// native webviews.
+    pub fn browser_ui(&mut self, ui: &mut egui::Ui) -> Option<(String, egui::Rect)> {
+        ui.horizontal(|ui| {
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut self.browser_input)
+                    .hint_text("https://…")
+                    .desired_width(ui.available_width() - 60.0),
+            );
+            let go = ui.button("Go").clicked()
+                || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+            if go {
+                let mut url = self.browser_input.trim().to_string();
+                if !url.starts_with("http") {
+                    url = format!("https://{url}");
+                }
+                self.browser_url = url;
             }
-            _ => {
-                ui.weak("this app is shell-drawn");
-            }
+        });
+        ui.weak(
+            "⚠ many sites block being embedded — blank page = the site refused (try wikipedia.org)",
+        );
+        ui.add_space(2.0);
+        let rect = ui.available_rect_before_wrap();
+        // Reserve the area so the window keeps its size.
+        ui.allocate_rect(rect, egui::Sense::hover());
+        if self.browser_url.is_empty() {
+            None
+        } else {
+            Some((self.browser_url.clone(), rect))
         }
     }
 

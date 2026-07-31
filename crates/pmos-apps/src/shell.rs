@@ -42,6 +42,9 @@ pub struct Shell {
     call_since: Option<f64>,
     conjure_apps: Vec<ConjureApp>,
     toasts: Vec<(String, f64)>,
+    /// Set each frame while the Browser window shows a page: (url, content
+    /// rect in points). The platform overlays the actual iframe there.
+    pub browser_view: Option<(String, [f32; 4])>,
     themed: bool,
 }
 
@@ -74,6 +77,7 @@ impl Shell {
             call_since: None,
             conjure_apps: Vec::new(),
             toasts: Vec::new(),
+            browser_view: None,
             themed: false,
         }
     }
@@ -242,6 +246,7 @@ impl Shell {
             self.palette.toggle();
         }
 
+        self.browser_view = None;
         self.handle_outcomes(ai_outcomes, kernel, now);
         self.windows(ctx, kernel, camera_feed, rt_tex, today, now);
         self.conjure_windows(ctx, kernel, now);
@@ -465,6 +470,7 @@ impl Shell {
         now: f64,
     ) {
         let mut actions: Vec<AppAction> = Vec::new();
+        let mut browser_view: Option<(String, [f32; 4])> = None;
         // Snapshot the cursor/landmark state the Hand Tracker window needs,
         // so the window closure doesn't re-borrow self.
         let raw = self.raw_hands.clone();
@@ -528,6 +534,13 @@ impl Shell {
                 }
                 AppKind::RayTracer => {
                     state.ray_tracer_ui(ui, kernel, pid, rt_tex);
+                    None
+                }
+                AppKind::Browser => {
+                    if let Some((url, rect)) = state.browser_ui(ui) {
+                        browser_view =
+                            Some((url, [rect.min.x, rect.min.y, rect.width(), rect.height()]));
+                    }
                     None
                 }
                 _ => {

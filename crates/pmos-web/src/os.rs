@@ -151,6 +151,48 @@ pub fn pmos_camera_frame(data: Vec<u8>, w: u32, h: u32) {
     CAMERA_PIXELS.with(|p| *p.borrow_mut() = Some((data, w, h)));
 }
 
+/// Keep the browser-app iframe in sync with the egui window's content rect
+/// (egui points == CSS px, since pixels_per_point == devicePixelRatio here).
+fn sync_browser_iframe(view: &Option<(String, [f32; 4])>) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let el = match doc.get_element_by_id("pmos-browser-frame") {
+        Some(el) => el,
+        None => {
+            let el = doc.create_element("iframe").unwrap();
+            el.set_id("pmos-browser-frame");
+            let _ = el.set_attribute(
+                "style",
+                "position:absolute;border:0;z-index:3;display:none;background:#fff;border-radius:0 0 10px 10px;",
+            );
+            let _ = el.set_attribute("sandbox", "allow-scripts allow-same-origin allow-forms");
+            if let Some(root) = doc.get_element_by_id("os-root") {
+                let _ = root.append_child(&el);
+            }
+            el
+        }
+    };
+    match view {
+        Some((url, rect)) => {
+            if el.get_attribute("src").as_deref() != Some(url.as_str()) {
+                let _ = el.set_attribute("src", url);
+            }
+            let style = format!(
+                "position:absolute;border:0;z-index:3;background:#fff;border-radius:0 0 10px 10px;left:{}px;top:{}px;width:{}px;height:{}px;",
+                rect[0], rect[1], rect[2].max(0.0), rect[3].max(0.0)
+            );
+            let _ = el.set_attribute("style", &style);
+        }
+        None => {
+            let _ = el.set_attribute(
+                "style",
+                "position:absolute;border:0;z-index:3;display:none;",
+            );
+        }
+    }
+}
+
 /// Apply kernel hands-directives to the JS pipeline (configure + start).
 fn apply_hands_directives(d: &pmos_kernel::HandsDirectives, camera_start: bool) {
     let Some(win) = web_sys::window() else { return };
@@ -478,6 +520,7 @@ impl OsApp {
         self.egui_ctx.begin_pass(raw_input);
         shell.update(&self.egui_ctx, kernel, camera_feed, rt_tex, &today);
         let output = self.egui_ctx.end_pass();
+        sync_browser_iframe(&self.shell.as_ref().unwrap().browser_view);
 
         egui_state.handle_platform_output(window, output.platform_output);
         let primitives = self
