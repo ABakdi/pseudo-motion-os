@@ -31,8 +31,22 @@ camera (getUserMedia, main thread — unavailable in workers)
 ```
 
 - **Rule-based, not ML classification**, for the pose layer: 9 topologically distinct poses need no trained classifier, and deterministic rules are tunable per-user and explainable when a gesture misfires. Raw landmarks remain available to userland apps via `input:raw-hands` capability for experiments.
-- **Coordinate mapping:** palm-centroid position maps to screen space through an adjustable *control box* (a subregion of camera view ≈ 40 cm × 25 cm of real space) with edge acceleration — small comfortable hand motions cover the whole screen.
+- **Coordinate mapping:** the cursor anchor (§2.1) maps to screen space through an adjustable *control box* (a subregion of camera view ≈ 40 cm × 25 cm of real space) — small comfortable hand motions cover the whole screen.
 - **Confidence gating:** below landmark-confidence threshold, gestures freeze rather than glitch (cursor holds position; a subtle "tracking lost" hint appears after 500 ms).
+
+### 2.1 Cursor stabilization *(added 2026-07-31 after field testing)*
+
+**The failure this section exists to prevent:** if the cursor anchor is a fingertip — or worse, *switches* landmarks per pose — then performing any gesture moves the cursor, because a gesture IS finger motion. The cursor teleports exactly at the moment of commit, defeating pointing entirely. (An early PMOS build anchored Point/Pinch to the index tip and everything else to the palm; pinching or making a fist jumped the cursor between the two anchors.)
+
+Three layers, applied in order:
+
+1. **One articulation-invariant anchor — never switched.** The cursor tracks the **palm centroid**: the mean of the wrist (0) and the four finger-base knuckles (MCP 5/9/13/17). These joints barely move under finger flexion — the same property MediaPipe exploits by detecting *palms*, "informed by the stability of palm region appearance under joint rotation and flexion." Fingertip anchors are rejected on principle, not tuned around.
+2. **Commit lock (soft deadband).** The instant a commit gesture starts *forming* — pinch-distance hysteresis latching, or a stateful pose (Pinch / MiddlePinch / Grab) becoming active — the cursor's current position becomes the **hold origin**. While held: hand motion within `HOLD_DEADZONE` (12 pt) is fully suppressed (the click lands where the user aimed); motion beyond it follows as `origin + delta·(1 − R/|delta|)` — a radially *soft* boundary with no snap, so pinch-drags and window-grabs still track naturally. This is the same commit-point stabilization industry deployments use (Ultraleap TouchFree's cursor stabilization + pinch hysteresis).
+3. **Release easing.** On gesture exit, the residual offset between the held output and the filtered position decays exponentially (~80 ms time constant) — releasing never jumps either.
+
+One-Euro smoothing (§2) remains the base layer beneath all three. Tuning: `HOLD_DEADZONE` 12 pt · release ease τ 80 ms · pinch latch enter/exit from §6.
+
+*Sources:* [MediaPipe Hands palm-stability design](https://www.emergentmind.com/topics/mediapipe-hands) · [Ultraleap TouchFree interaction settings](https://docs.ultraleap.com/TouchFree/touchfree-user-manual/interaction-settings.html) · [Ultraleap pinch hysteresis guidance](https://docs.ultraleap.com/xr-and-tabletop/xr/unity/plugin/features/pinch-and-grab-detection.html) · field reports of pinch-drift with fingertip anchors ([example](https://chernando.com/blog/2023/07/23/hand-tracking-for-mouse-input.html)).
 
 ---
 
