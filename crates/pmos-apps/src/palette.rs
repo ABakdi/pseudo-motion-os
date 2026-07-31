@@ -15,6 +15,8 @@ pub enum PaletteOutcome {
     SpawnConjure(String),
     /// Send a prompt to an agent (assistant chat or App Smith repair).
     Prompt(AgentId, String),
+    /// Cancel speech capture (Esc while listening).
+    VoiceStop,
 }
 
 #[derive(Clone)]
@@ -32,12 +34,22 @@ struct Smith {
     round: u8,
 }
 
+/// Voice mode state (UI spec §2.4): live transcript shown while listening —
+/// voice never acts without its text being visible first.
+#[derive(Default)]
+struct Voice {
+    listening: bool,
+    /// Latest interim transcript (superseded by the final utterance).
+    interim: String,
+}
+
 pub struct Palette {
     pub open: bool,
     input: String,
     lines: Vec<Line>,
     assistant_streaming: bool,
     smith: Smith,
+    voice: Voice,
     focus_input: bool,
 }
 
@@ -52,6 +64,7 @@ impl Palette {
             )],
             assistant_streaming: false,
             smith: Smith::default(),
+            voice: Voice::default(),
             focus_input: false,
         }
     }
@@ -60,6 +73,59 @@ impl Palette {
         self.open = !self.open;
         if self.open {
             self.focus_input = true;
+        }
+    }
+
+    /// Enter voice mode (🤙 hold): open, and show the listening state while
+    /// speech capture spins up.
+    pub fn start_voice(&mut self) {
+        self.open = true;
+        self.focus_input = false;
+        self.voice.listening = true;
+        self.voice.interim.clear();
+        self.lines
+            .push(Line::System("🎤 listening — speak a command…".into()));
+    }
+
+    /// Speech-engine status from the kernel. Ending with an unsubmitted
+    /// interim transcript submits it — the engine died before finalizing,
+    /// but the user said something and saw it on screen.
+    pub fn on_voice_status(
+        &mut self,
+        listening: bool,
+        available: bool,
+        reason: &str,
+    ) -> Vec<PaletteOutcome> {
+        let was = self.voice.listening;
+        self.voice.listening = listening;
+        if !available {
+            self.lines.push(Line::System(format!("⚠ voice: {reason}")));
+            return Vec::new();
+        }
+        if was && !listening {
+            if !reason.is_empty() {
+                self.lines.push(Line::System(format!("🎤 {reason}")));
+            }
+            let leftover = std::mem::take(&mut self.voice.interim);
+            if !leftover.is_empty() {
+                self.input.clear();
+                return self.route(leftover, true);
+            }
+        }
+        Vec::new()
+    }
+
+    /// Transcript from the kernel: interim text streams into the input line
+    /// in real time; the final utterance replaces it and executes.
+    pub fn on_voice_transcript(&mut self, text: String, is_final: bool) -> Vec<PaletteOutcome> {
+        if is_final {
+            self.voice.interim.clear();
+            self.input.clear();
+            self.route(text, true)
+        } else {
+            self.voice.interim = text.clone();
+            self.input = text;
+            Vec::new()
         }
     }
 
@@ -145,12 +211,19 @@ impl Palette {
         }
     }
 
-    fn submit(&mut self, raw: String) -> Vec<PaletteOutcome> {
+    /// One brain for typed and spoken input. `voice` changes only the
+    /// fallback: unrecognized speech is conversational, so it goes to the
+    /// assistant instead of an "unknown command" shrug.
+    fn route(&mut self, raw: String, voice: bool) -> Vec<PaletteOutcome> {
         let text = raw.trim().to_string();
         if text.is_empty() {
             return Vec::new();
         }
-        self.lines.push(Line::User(text.clone()));
+        self.lines.push(Line::User(if voice {
+            format!("🎤 {text}")
+        } else {
+            text.clone()
+        }));
 
         // Assistant chat.
         if let Some(q) = text.strip_prefix('>') {
@@ -174,12 +247,23 @@ impl Palette {
             return vec![PaletteOutcome::Prompt(AGENT_APP_SMITH, text)];
         }
 
-        // Commands.
-        if lower == "launcher" {
+        // Commands. Spoken phrasing arrives as "open the terminal" — strip
+        // launch verbs and articles before matching app names.
+        let cmd = {
+            let mut c = lower.trim_end_matches(['.', '!', '?']).trim();
+            for verb in ["open ", "launch ", "start ", "show ", "go to "] {
+                if let Some(rest) = c.strip_prefix(verb) {
+                    c = rest;
+                    break;
+                }
+            }
+            c.strip_prefix("the ").unwrap_or(c).trim().to_string()
+        };
+        if cmd == "launcher" {
             self.open = false;
             return vec![PaletteOutcome::OpenLauncher];
         }
-        if lower == "demo" || lower == "demo app" {
+        if cmd == "demo" || cmd == "demo app" {
             self.lines
                 .push(Line::System("✨ spawning the demo app".into()));
             return vec![PaletteOutcome::SpawnConjure(
@@ -187,10 +271,15 @@ impl Palette {
             )];
         }
         for kind in ALL {
-            if kind.title().to_lowercase().contains(&lower) {
+            if kind.title().to_lowercase().contains(&cmd) {
                 self.open = false;
                 return vec![PaletteOutcome::Launch(kind)];
             }
+        }
+        if voice {
+            self.assistant_streaming = true;
+            self.lines.push(Line::Assistant(String::new()));
+            return vec![PaletteOutcome::Prompt(AGENT_ASSISTANT, text)];
         }
         self.lines.push(Line::System(format!(
             "unknown command `{text}` — try an app name, `demo`, `> question`, or `make …`"
@@ -226,8 +315,25 @@ impl Palette {
                         }
                         if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                             let text = std::mem::take(&mut self.input);
-                            outcomes.extend(self.submit(text));
+                            outcomes.extend(self.route(text, false));
                             resp.request_focus();
+                        }
+
+                        if self.voice.listening {
+                            let t = ui.input(|i| i.time);
+                            let a = (0.55 + 0.45 * (t * 4.0).sin().abs()) as f32;
+                            ui.horizontal(|ui| {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(0xff, 0x5c, 0x7a).gamma_multiply(a),
+                                    "● 🎤 listening",
+                                );
+                                ui.weak(if self.voice.interim.is_empty() {
+                                    "— speak, your words appear live · Esc cancels"
+                                } else {
+                                    "— pause to run it"
+                                });
+                            });
+                            ui.ctx().request_repaint(); // keep the pulse alive
                         }
 
                         ui.add_space(6.0);
@@ -256,11 +362,18 @@ impl Palette {
                                 }
                             });
                         ui.add_space(2.0);
-                        ui.weak("Esc closes · 🤙 tap or Ctrl+K toggles");
+                        ui.weak("Esc closes · 🤙 tap or Ctrl+K toggles · 🤙 hold to speak");
                     });
             });
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.open = false;
+            if self.voice.listening {
+                self.voice = Voice::default();
+                self.input.clear();
+                self.lines.push(Line::System("🎤 cancelled".into()));
+                outcomes.push(PaletteOutcome::VoiceStop);
+            } else {
+                self.open = false;
+            }
         }
         outcomes
     }

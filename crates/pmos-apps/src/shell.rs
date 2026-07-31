@@ -40,6 +40,7 @@ pub struct Shell {
     /// The command palette (UI spec §2.4).
     palette: Palette,
     call_since: Option<f64>,
+    call_fired: bool,
     conjure_apps: Vec<ConjureApp>,
     toasts: Vec<(String, f64)>,
     /// Set each frame while the Browser window shows a page: (url, content
@@ -75,6 +76,7 @@ impl Shell {
             palm_fired: false,
             palette: Palette::new(),
             call_since: None,
+            call_fired: false,
             conjure_apps: Vec::new(),
             toasts: Vec::new(),
             browser_view: None,
@@ -98,6 +100,9 @@ impl Shell {
                 PaletteOutcome::OpenLauncher => self.launcher_open = true,
                 PaletteOutcome::Prompt(agent, msg) => {
                     let _ = kernel.syscall(self.pid, Syscall::AiPrompt { agent, msg });
+                }
+                PaletteOutcome::VoiceStop => {
+                    let _ = kernel.syscall(self.pid, Syscall::VoiceCapture { start: false });
                 }
                 PaletteOutcome::SpawnConjure(doc) => {
                     if let Err(e) = self.spawn_conjure(kernel, &doc, now) {
@@ -211,6 +216,18 @@ impl Shell {
                     let outcomes = self.palette.on_chunk(agent, &text, done);
                     ai_outcomes.extend(outcomes);
                 }
+                KernelEvent::VoiceStatus {
+                    listening,
+                    available,
+                    reason,
+                } => {
+                    let outcomes = self.palette.on_voice_status(listening, available, &reason);
+                    ai_outcomes.extend(outcomes);
+                }
+                KernelEvent::VoiceTranscript { text, is_final } => {
+                    let outcomes = self.palette.on_voice_transcript(text, is_final);
+                    ai_outcomes.extend(outcomes);
+                }
                 other => log::debug!("shell event: {other:?}"),
             }
         }
@@ -233,13 +250,23 @@ impl Shell {
             self.launcher_open = false;
         }
 
-        // 🤙 tap toggles the palette (Hand Gestures spec G8: tap < 0.5 s).
+        // 🤙 tap toggles the palette; 🤙 HELD ≥ 0.6 s opens it in voice mode
+        // and starts speech capture (Hand Gestures spec G8). The dwell makes
+        // the voice trigger impossible to hit by accident.
         if self.cursor.tracking && self.cursor.pose == pmos_abi::HandPose::CallSign {
-            self.call_since.get_or_insert(now);
-        } else if let Some(since) = self.call_since.take() {
-            if now - since < 0.5 {
-                self.palette.toggle();
+            let since = *self.call_since.get_or_insert(now);
+            if now - since >= 0.6 && !self.call_fired {
+                self.call_fired = true;
+                self.palette.start_voice();
+                let _ = kernel.syscall(self.pid, Syscall::VoiceCapture { start: true });
             }
+        } else {
+            if let Some(since) = self.call_since.take() {
+                if !self.call_fired && now - since < 0.5 {
+                    self.palette.toggle();
+                }
+            }
+            self.call_fired = false;
         }
         // Ctrl+K.
         if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command) {
