@@ -7,6 +7,62 @@ use crate::theme;
 use pmos_abi::{AgentId, AGENT_APP_SMITH, AGENT_ASSISTANT};
 
 const MAX_REPAIR_ROUNDS: u8 = 2;
+/// Tool-call budget per user request (AI System spec §3).
+const MAX_TOOL_ROUNDS: u8 = 4;
+
+/// A parsed `@@tool` invocation from an assistant reply (AI System spec §3).
+#[derive(Debug, Clone)]
+pub struct ToolCall {
+    pub tool: String,
+    pub args: serde_json::Value,
+}
+
+/// Find a trailing `@@tool {...}` line in an assistant reply. Returns the
+/// reply with that line removed (what the user should see) and the call.
+/// Tolerates models wrapping the line in code fences.
+fn extract_tool_call(text: &str) -> Option<(String, ToolCall)> {
+    for line in text.lines().rev() {
+        let t = line.trim().trim_matches('`').trim();
+        let Some(json) = t.strip_prefix("@@tool ") else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(json.trim()) else {
+            continue;
+        };
+        let tool = v.get("tool")?.as_str()?.to_string();
+        let args = v.get("args").cloned().unwrap_or(serde_json::json!({}));
+        let visible = text
+            .lines()
+            .filter(|l| *l != line)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string();
+        return Some((visible, ToolCall { tool, args }));
+    }
+    None
+}
+
+/// One-line arg summary for the transparency log ("🔧 fs_read /notes/x.md").
+fn compact_args(args: &serde_json::Value) -> String {
+    let mut parts = Vec::new();
+    if let Some(map) = args.as_object() {
+        for (k, v) in map {
+            let s = v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string());
+            let s = if s.chars().count() > 40 {
+                format!("{}…", s.chars().take(40).collect::<String>())
+            } else {
+                s
+            };
+            parts.push(if k == "path" || k == "name" {
+                s
+            } else {
+                format!("{k}={s}")
+            });
+        }
+    }
+    parts.join(" ")
+}
 
 pub enum PaletteOutcome {
     Launch(AppKind),
@@ -17,6 +73,9 @@ pub enum PaletteOutcome {
     Prompt(AgentId, String),
     /// Cancel speech capture (Esc while listening).
     VoiceStop,
+    /// The assistant asked for a tool run — the shell executes it via
+    /// capability-checked syscalls and reports back with `tool_result`.
+    ToolCall(ToolCall),
 }
 
 #[derive(Clone)]
@@ -56,6 +115,8 @@ pub struct Palette {
     assistant_streaming: bool,
     smith: Smith,
     voice: Voice,
+    /// Tool calls consumed by the current assistant request (budgeted).
+    tool_rounds: u8,
     focus_input: bool,
 }
 
@@ -71,6 +132,7 @@ impl Palette {
             assistant_streaming: false,
             smith: Smith::default(),
             voice: Voice::default(),
+            tool_rounds: 0,
             focus_input: false,
         }
     }
@@ -160,6 +222,35 @@ impl Palette {
             }
             if done {
                 self.assistant_streaming = false;
+                // Did the reply end in a tool call? Strip it from the visible
+                // line, log it (nothing acts invisibly), hand it to the shell.
+                let call = match self.lines.last_mut() {
+                    Some(Line::Assistant(s)) => extract_tool_call(s).map(|(visible, call)| {
+                        *s = visible;
+                        call
+                    }),
+                    _ => None,
+                };
+                if let Some(call) = call {
+                    if matches!(self.lines.last(), Some(Line::Assistant(s)) if s.is_empty()) {
+                        self.lines.pop();
+                    }
+                    if self.tool_rounds >= MAX_TOOL_ROUNDS {
+                        self.lines.push(Line::System(
+                            "⚠ tool budget exhausted (4 calls per request)".into(),
+                        ));
+                    } else {
+                        self.tool_rounds += 1;
+                        self.lines.push(Line::System(format!(
+                            "🔧 {} {}",
+                            call.tool,
+                            compact_args(&call.args)
+                        )));
+                        out.push(PaletteOutcome::ToolCall(call));
+                    }
+                } else {
+                    self.tool_rounds = 0;
+                }
             }
         } else if agent == AGENT_APP_SMITH && self.smith.active {
             if text.starts_with('⚠') {
@@ -173,6 +264,18 @@ impl Palette {
             }
         }
         out
+    }
+
+    /// Report a tool run's outcome back to the assistant and let it continue.
+    pub fn tool_result(&mut self, tool: &str, ok: bool, result: &str) -> Vec<PaletteOutcome> {
+        let payload =
+            serde_json::json!({ "tool": tool, "ok": ok, "result": result }).to_string();
+        self.assistant_streaming = true;
+        self.lines.push(Line::Assistant(String::new()));
+        vec![PaletteOutcome::Prompt(
+            AGENT_ASSISTANT,
+            format!("@@tool_result {payload}"),
+        )]
     }
 
     fn finish_conjure(&mut self) -> Vec<PaletteOutcome> {
@@ -248,6 +351,7 @@ impl Palette {
         // Assistant chat.
         if let Some(q) = text.strip_prefix('>') {
             self.assistant_streaming = true;
+            self.tool_rounds = 0;
             self.lines.push(Line::Assistant(String::new()));
             return vec![PaletteOutcome::Prompt(AGENT_ASSISTANT, q.trim().into())];
         }
@@ -298,6 +402,7 @@ impl Palette {
         }
         if voice {
             self.assistant_streaming = true;
+            self.tool_rounds = 0;
             self.lines.push(Line::Assistant(String::new()));
             return vec![PaletteOutcome::Prompt(AGENT_ASSISTANT, text)];
         }
@@ -404,5 +509,34 @@ impl Palette {
 impl Default for Palette {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_trailing_tool_call() {
+        let text = "Let me check your notes.\n@@tool {\"tool\":\"fs_list\",\"args\":{\"path\":\"/notes\"}}";
+        let (visible, call) = extract_tool_call(text).expect("tool call");
+        assert_eq!(visible, "Let me check your notes.");
+        assert_eq!(call.tool, "fs_list");
+        assert_eq!(call.args["path"], "/notes");
+    }
+
+    #[test]
+    fn tolerates_code_fences_and_missing_args() {
+        let text = "`@@tool {\"tool\":\"sys_query\"}`";
+        let (visible, call) = extract_tool_call(text).expect("tool call");
+        assert!(visible.is_empty());
+        assert_eq!(call.tool, "sys_query");
+        assert!(call.args.as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn plain_replies_are_not_tool_calls() {
+        assert!(extract_tool_call("The fps is around 60.").is_none());
+        assert!(extract_tool_call("mentions @@tool but not as a call line").is_none());
     }
 }

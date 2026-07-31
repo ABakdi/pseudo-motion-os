@@ -4,7 +4,7 @@
 use crate::app_host;
 use crate::apps::{AppAction, AppKind, AppState, ALL};
 use crate::cursor::HandCursor;
-use crate::palette::{Palette, PaletteOutcome};
+use crate::palette::{Palette, PaletteOutcome, ToolCall};
 use crate::theme;
 use pmos_abi::{KernelApi, KernelEvent, Pid, Reply, Syscall, WinDesc, WinId};
 use pmos_conjure::{AppInstance, Effect};
@@ -104,12 +104,112 @@ impl Shell {
                 PaletteOutcome::VoiceStop => {
                     let _ = kernel.syscall(self.pid, Syscall::VoiceCapture { start: false });
                 }
+                PaletteOutcome::ToolCall(call) => {
+                    let (ok, result) = self.execute_tool(kernel, &call, now);
+                    let more = self.palette.tool_result(&call.tool, ok, &result);
+                    self.handle_outcomes(more, kernel, now);
+                }
                 PaletteOutcome::SpawnConjure(doc) => {
                     if let Err(e) = self.spawn_conjure(kernel, &doc, now) {
                         self.toast(format!("⚠ couldn't spawn app: {e}"), now);
                     }
                 }
             }
+        }
+    }
+
+    /// Execute one assistant tool call through capability-checked syscalls
+    /// (AI System spec §3). The shell is just an ABI client here — every call
+    /// goes through the kernel dispatcher like any other process's would.
+    fn execute_tool(
+        &mut self,
+        kernel: &mut dyn KernelApi,
+        call: &ToolCall,
+        now: f64,
+    ) -> (bool, String) {
+        const MAX_RESULT: usize = 4000;
+        let arg = |key: &str| {
+            call.args
+                .get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+        match call.tool.as_str() {
+            "sys_query" => match kernel.syscall(self.pid, Syscall::SysQuery { path: arg("path") })
+            {
+                Ok(Reply::Bytes(b)) => (true, String::from_utf8_lossy(&b).into_owned()),
+                Ok(_) => (true, String::new()),
+                Err(e) => (false, format!("{e:?}")),
+            },
+            "fs_list" => match kernel.syscall(self.pid, Syscall::FsList { path: arg("path") }) {
+                Ok(Reply::Entries(entries)) => (
+                    true,
+                    entries
+                        .iter()
+                        .map(|e| {
+                            if e.dir {
+                                format!("{}/", e.name)
+                            } else {
+                                format!("{} ({} B)", e.name, e.size)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ),
+                Ok(_) => (true, String::new()),
+                Err(e) => (false, format!("{e:?}")),
+            },
+            "fs_read" => match kernel.syscall(self.pid, Syscall::FsRead { path: arg("path") }) {
+                Ok(Reply::Bytes(b)) => {
+                    let mut text = String::from_utf8_lossy(&b).into_owned();
+                    if text.len() > MAX_RESULT {
+                        let cut = text
+                            .char_indices()
+                            .take_while(|(i, _)| *i < MAX_RESULT)
+                            .last()
+                            .map(|(i, c)| i + c.len_utf8())
+                            .unwrap_or(0);
+                        text.truncate(cut);
+                        text.push_str("\n… (truncated)");
+                    }
+                    (true, text)
+                }
+                Ok(_) => (true, String::new()),
+                Err(e) => (false, format!("{e:?}")),
+            },
+            "fs_write" => {
+                let path = arg("path");
+                let content = arg("content");
+                match kernel.syscall(
+                    self.pid,
+                    Syscall::FsWrite {
+                        path: path.clone(),
+                        bytes: content.into_bytes(),
+                    },
+                ) {
+                    Ok(_) => {
+                        // Tier-1 transparency (AI System spec §6): reversible
+                        // writes surface as a toast.
+                        self.toast(format!("🤖 assistant wrote {path}"), now);
+                        (true, "written".into())
+                    }
+                    Err(e) => (false, format!("{e:?}")),
+                }
+            }
+            "app_open" => {
+                let name = arg("name").to_lowercase();
+                if !name.is_empty() {
+                    for kind in ALL {
+                        if kind.title().to_lowercase().contains(&name) {
+                            self.launch(kernel, kind);
+                            return (true, format!("opened {}", kind.title()));
+                        }
+                    }
+                }
+                (false, format!("unknown app `{name}`"))
+            }
+            other => (false, format!("unknown tool `{other}`")),
         }
     }
 
