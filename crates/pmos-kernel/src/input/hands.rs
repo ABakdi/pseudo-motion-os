@@ -86,6 +86,12 @@ const DEBOUNCE_FRAMES: u8 = 3;
 const DEBOUNCE_FRAMES_PINCH: u8 = 2;
 /// No landmarks for this long → tracking lost (cursor freezes, spec §7).
 const LOST_AFTER_SECS: f64 = 0.5;
+/// Commit lock (spec §2.1): while a commit gesture is forming/held, cursor
+/// motion within this radius (egui points) is suppressed entirely.
+const HOLD_DEADZONE: f32 = 12.0;
+/// Release easing time constant (spec §2.1): the offset accumulated during a
+/// hold decays with e^(-dt/τ) instead of snapping back on release.
+const RELEASE_TAU: f32 = 0.08;
 
 // ---------- landmark indices (MediaPipe hand model) ----------
 
@@ -112,6 +118,13 @@ fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
 
 // ---------- recognizer ----------
 
+/// Commit-lock state (spec §2.1): where the cursor froze when the gesture
+/// started forming, and the filtered position it froze at.
+struct Hold {
+    origin: [f32; 2],
+    entry: [f32; 2],
+}
+
 pub struct HandsState {
     pub pose: HandPose,
     pub pinch: f32,
@@ -125,6 +138,8 @@ pub struct HandsState {
     candidate_frames: u8,
     fx: OneEuro,
     fy: OneEuro,
+    hold: Option<Hold>,
+    release_offset: [f32; 2],
     last_seen: f64,
     last_frame: f64,
     /// Runtime-tunable pinch thresholds (Hand Tracker app, ABI 1.2).
@@ -146,6 +161,8 @@ impl HandsState {
             candidate_frames: 0,
             fx: OneEuro::cursor(),
             fy: OneEuro::cursor(),
+            hold: None,
+            release_offset: [0.0, 0.0],
             last_seen: 0.0,
             last_frame: 0.0,
             pinch_enter: PINCH_ENTER,
@@ -204,23 +221,62 @@ impl HandsState {
             / (self.pinch_exit * 1.6 - self.pinch_enter))
             .clamp(0.0, 1.0);
 
-        // Cursor: index tip for precise poses, palm centroid otherwise.
-        let anchor = match self.pose {
-            HandPose::Point | HandPose::Pinch | HandPose::TwoFinger => pt(lm, INDEX_TIP),
-            _ => {
-                let ids = [0usize, 5, 9, 13, 17];
-                let (sx, sy) = ids.iter().fold((0.0, 0.0), |acc, &i| {
-                    (acc.0 + pt(lm, i).0, acc.1 + pt(lm, i).1)
-                });
-                (sx / 5.0, sy / 5.0)
-            }
-        };
+        // Cursor anchor (spec §2.1): always the palm centroid — wrist + the
+        // four MCP knuckles, joints that barely move under finger flexion.
+        // Never pose-switched: fingertips move with every gesture, so any
+        // fingertip anchor teleports the cursor at the moment of commit.
+        let ids = [WRIST, 5, 9, 13, 17];
+        let (sx, sy) = ids.iter().fold((0.0, 0.0), |acc, &i| {
+            (acc.0 + pt(lm, i).0, acc.1 + pt(lm, i).1)
+        });
+        let anchor = (sx / 5.0, sy / 5.0);
         // Mirror x (webcam shows a mirror image), map through the control box.
         let nx = ((1.0 - anchor.0) - BOX_X.0) / (BOX_X.1 - BOX_X.0);
         let ny = (anchor.1 - BOX_Y.0) / (BOX_Y.1 - BOX_Y.0);
         let px = self.fx.filter(nx.clamp(0.0, 1.0) * viewport[0], dt);
         let py = self.fy.filter(ny.clamp(0.0, 1.0) * viewport[1], dt);
-        self.cursor = Some([px, py]);
+        self.cursor = Some(self.stabilize([px, py], dt));
+    }
+
+    /// Commit lock + release easing (spec §2.1). `pinch_latched` engages the
+    /// lock the instant a pinch starts forming — before the debounced pose
+    /// flips — so the cursor is already frozen when the click fires.
+    fn stabilize(&mut self, filtered: [f32; 2], dt: f32) -> [f32; 2] {
+        let holding = self.pinch_latched
+            || matches!(
+                self.pose,
+                HandPose::Pinch | HandPose::MiddlePinch | HandPose::Grab
+            );
+        if holding {
+            let hold = self.hold.get_or_insert(Hold {
+                origin: self.cursor.unwrap_or(filtered),
+                entry: filtered,
+            });
+            let dx = filtered[0] - hold.entry[0];
+            let dy = filtered[1] - hold.entry[1];
+            let r = (dx * dx + dy * dy).sqrt();
+            if r <= HOLD_DEADZONE {
+                hold.origin
+            } else {
+                // Soft boundary: only the radial excess moves the cursor, so
+                // crossing the deadzone never snaps and drags track smoothly.
+                let k = 1.0 - HOLD_DEADZONE / r;
+                [hold.origin[0] + dx * k, hold.origin[1] + dy * k]
+            }
+        } else {
+            if self.hold.take().is_some() {
+                if let Some(prev) = self.cursor {
+                    self.release_offset = [prev[0] - filtered[0], prev[1] - filtered[1]];
+                }
+            }
+            let decay = (-dt / RELEASE_TAU).exp();
+            self.release_offset[0] *= decay;
+            self.release_offset[1] *= decay;
+            [
+                filtered[0] + self.release_offset[0],
+                filtered[1] + self.release_offset[1],
+            ]
+        }
     }
 
     /// Time-based upkeep; call every frame regardless of worker delivery.
@@ -233,6 +289,8 @@ impl HandsState {
             self.candidate_frames = 0;
             self.fx.reset();
             self.fy.reset();
+            self.hold = None;
+            self.release_offset = [0.0, 0.0];
         }
     }
 }
@@ -356,5 +414,114 @@ mod tests {
             y = f.filter(100.0, 1.0 / 60.0);
         }
         assert!((y - 100.0).abs() < 1.0);
+    }
+
+    // ---------- cursor stabilization (spec §2.1) ----------
+
+    const VP: [f32; 2] = [1000.0, 1000.0];
+
+    /// Shift every landmark of a hand by (dx, dy) in camera space.
+    fn shifted(lm: &[f32], dx: f32, dy: f32) -> Vec<f32> {
+        let mut v = lm.to_vec();
+        for i in 0..21 {
+            v[i * 3] += dx;
+            v[i * 3 + 1] += dy;
+        }
+        v
+    }
+
+    fn run(s: &mut HandsState, lm: &[f32], frames: usize, t0: &mut f64) -> [f32; 2] {
+        for _ in 0..frames {
+            *t0 += 1.0 / 60.0;
+            s.ingest(lm, 1, VP, *t0);
+        }
+        s.cursor.unwrap()
+    }
+
+    #[test]
+    fn cursor_invariant_to_pose_change() {
+        // Same palm, fingers go Point → fist: the cursor must not move,
+        // because the anchor uses only articulation-invariant joints.
+        let point = hand(&[
+            (INDEX_TIP, 0.0, -0.3),
+            (INDEX_PIP, 0.0, -0.15),
+            (THUMB_TIP, 0.15, 0.0),
+        ]);
+        let fist = hand(&[]);
+        let mut s = HandsState::new();
+        let mut t = 0.0;
+        let before = run(&mut s, &point, 30, &mut t);
+        let after = run(&mut s, &fist, 10, &mut t);
+        assert!(
+            (after[0] - before[0]).abs() < 0.5 && (after[1] - before[1]).abs() < 0.5,
+            "pose switch moved cursor: {before:?} -> {after:?}"
+        );
+    }
+
+    #[test]
+    fn commit_lock_freezes_small_drift() {
+        // A forming pinch freezes the cursor; drift below the deadzone
+        // must not move it at all.
+        let pinch = hand(&[
+            (THUMB_TIP, 0.2, -0.2),
+            (INDEX_TIP, 0.21, -0.2),
+            (INDEX_PIP, 0.1, -0.1),
+        ]);
+        let mut s = HandsState::new();
+        let mut t = 0.0;
+        let held = run(&mut s, &pinch, 30, &mut t);
+        // 0.003 camera units ≈ 5 pt through the control box — inside 12 pt.
+        let drifted = run(&mut s, &shifted(&pinch, 0.003, 0.002), 10, &mut t);
+        assert_eq!(held, drifted, "sub-deadzone drift moved a held cursor");
+    }
+
+    #[test]
+    fn commit_lock_follows_large_motion() {
+        // Deliberate motion while pinching (a drag) must still track.
+        let pinch = hand(&[
+            (THUMB_TIP, 0.2, -0.2),
+            (INDEX_TIP, 0.21, -0.2),
+            (INDEX_PIP, 0.1, -0.1),
+        ]);
+        let mut s = HandsState::new();
+        let mut t = 0.0;
+        let held = run(&mut s, &pinch, 30, &mut t);
+        // 0.08 camera units ≈ 140 pt — far beyond the deadzone.
+        let dragged = run(&mut s, &shifted(&pinch, 0.08, 0.0), 30, &mut t);
+        assert!(
+            (dragged[0] - held[0]).abs() > 60.0,
+            "drag did not follow: {held:?} -> {dragged:?}"
+        );
+    }
+
+    #[test]
+    fn release_eases_instead_of_jumping() {
+        // Drift a little during the hold (cursor frozen), then release: the
+        // cursor must ease back, never jump by the accumulated offset.
+        let pinch = hand(&[
+            (THUMB_TIP, 0.2, -0.2),
+            (INDEX_TIP, 0.21, -0.2),
+            (INDEX_PIP, 0.1, -0.1),
+        ]);
+        let open = hand(&[
+            (THUMB_TIP, 0.15, 0.05),
+            (INDEX_TIP, 0.05, -0.28),
+            (INDEX_PIP, 0.05, -0.15),
+            (MIDDLE_TIP, 0.0, -0.30),
+            (MIDDLE_PIP, 0.0, -0.16),
+            (RING_TIP, -0.05, -0.28),
+            (RING_PIP, -0.05, -0.15),
+            (PINKY_TIP, -0.09, -0.24),
+            (PINKY_PIP, -0.08, -0.13),
+        ]);
+        let mut s = HandsState::new();
+        let mut t = 0.0;
+        run(&mut s, &pinch, 30, &mut t);
+        let frozen = run(&mut s, &shifted(&pinch, 0.005, 0.0), 10, &mut t);
+        // Release with the same palm drift still in place.
+        let released = run(&mut s, &shifted(&open, 0.005, 0.0), 1, &mut t);
+        let jump =
+            ((released[0] - frozen[0]).powi(2) + (released[1] - frozen[1]).powi(2)).sqrt();
+        assert!(jump < 4.0, "release jumped {jump} pt");
     }
 }
