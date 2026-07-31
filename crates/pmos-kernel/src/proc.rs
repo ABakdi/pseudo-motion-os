@@ -29,6 +29,7 @@ pub fn shell_caps() -> Vec<Capability> {
         Capability::ProcSpawnApp,
         Capability::NotesRead,
         Capability::InputRawHands,
+        Capability::VoiceInput,
         Capability::AiPrompt,
         Capability::FsRead("/".into()),
         Capability::FsWrite("/".into()),

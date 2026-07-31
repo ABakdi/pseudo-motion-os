@@ -39,6 +39,14 @@ pub struct HandsDirectives {
     pub generation: u32,
 }
 
+/// Voice-capture directive (ABI 1.5): shell intent → platform speech engine.
+/// Same generation contract as [`HandsDirectives`].
+#[derive(Clone, PartialEq)]
+pub struct VoiceDirectives {
+    pub capture: bool,
+    pub generation: u32,
+}
+
 /// The kernel root object, owned by the platform entry point (`pmos-web`).
 pub struct Kernel {
     pub procs: proc::ProcessTable,
@@ -46,6 +54,7 @@ pub struct Kernel {
     /// Graphics engine — installed after the async wgpu device request.
     pub gfx: Option<gfx::Gfx>,
     pub hands_directives: HandsDirectives,
+    pub voice_directives: VoiceDirectives,
     pub ai: ai::AiState,
     pub vfs: vfs::Vfs,
     pub phys: phys::Physics,
@@ -66,6 +75,10 @@ impl Kernel {
                 viewer_open: false,
                 stream_feed: false,
                 tuning: HandsTuning::default(),
+                generation: 0,
+            },
+            voice_directives: VoiceDirectives {
+                capture: false,
                 generation: 0,
             },
             ai: ai::AiState::default(),
@@ -192,6 +205,32 @@ impl Kernel {
         self.push_event(
             proc::SHELL_PID,
             KernelEvent::CameraStatus { enabled, reason },
+        );
+    }
+
+    /// Speech-engine status from the platform → shell (ABI 1.5). When the
+    /// engine ends on its own (end of utterance, error), the capture intent
+    /// is synced without a generation bump — no stop call needs dispatching.
+    pub fn voice_status(&mut self, listening: bool, available: bool, reason: String) {
+        if !listening {
+            self.voice_directives.capture = false;
+        }
+        self.push_event(
+            proc::SHELL_PID,
+            KernelEvent::VoiceStatus {
+                listening,
+                available,
+                reason,
+            },
+        );
+    }
+
+    /// Speech transcript from the platform → shell (ABI 1.5). Text only:
+    /// audio never crosses this boundary (AI System spec §5).
+    pub fn voice_transcript(&mut self, text: String, is_final: bool) {
+        self.push_event(
+            proc::SHELL_PID,
+            KernelEvent::VoiceTranscript { text, is_final },
         );
     }
 
@@ -403,6 +442,14 @@ impl KernelApi for Kernel {
                 }
                 Ok(Reply::None)
             }
+            Syscall::VoiceCapture { start } => {
+                self.require(caller, &Capability::VoiceInput)?;
+                if self.voice_directives.capture != start {
+                    self.voice_directives.capture = start;
+                    self.voice_directives.generation += 1;
+                }
+                Ok(Reply::None)
+            }
             other => {
                 log::debug!("unimplemented syscall from {caller:?}: {other:?}");
                 Err(ErrorCode::Unsupported)
@@ -418,5 +465,51 @@ impl KernelApi for Kernel {
 impl Default for Kernel {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn register(k: &mut Kernel, name: &str) -> Pid {
+        match k
+            .syscall(
+                proc::SHELL_PID,
+                Syscall::ProcRegister {
+                    name: name.into(),
+                    caps: vec![],
+                },
+            )
+            .unwrap()
+        {
+            Reply::Pid(p) => p,
+            other => panic!("unexpected reply {other:?}"),
+        }
+    }
+
+    #[test]
+    fn voice_capture_is_gated_and_generation_counted() {
+        let mut k = Kernel::new();
+        let shell = register(&mut k, "shell"); // first process = shell grant
+        let app = register(&mut k, "app"); // default caps only
+
+        assert!(matches!(
+            k.syscall(app, Syscall::VoiceCapture { start: true }),
+            Err(ErrorCode::CapabilityDenied)
+        ));
+
+        let g0 = k.voice_directives.generation;
+        k.syscall(shell, Syscall::VoiceCapture { start: true }).unwrap();
+        assert!(k.voice_directives.capture);
+        assert_eq!(k.voice_directives.generation, g0 + 1);
+        // Idempotent: same intent must not re-trigger the platform.
+        k.syscall(shell, Syscall::VoiceCapture { start: true }).unwrap();
+        assert_eq!(k.voice_directives.generation, g0 + 1);
+
+        // Engine ending on its own syncs intent without a generation bump.
+        k.voice_status(false, true, String::new());
+        assert!(!k.voice_directives.capture);
+        assert_eq!(k.voice_directives.generation, g0 + 1);
     }
 }

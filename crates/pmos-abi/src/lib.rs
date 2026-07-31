@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 4);
+pub const ABI_VERSION: (u16, u16) = (1, 5);
 
 // ---------- handles ----------
 
@@ -48,6 +48,8 @@ pub enum Capability {
     AiPrompt,
     PhysSpawn,
     InputRawHands,
+    /// Start/stop speech capture and receive transcripts (ABI 1.5).
+    VoiceInput,
     SysQuery,
     ProcSpawnApp,
     ClipboardWrite,
@@ -117,6 +119,13 @@ pub enum Syscall {
     /// confidences) are applied by the platform; recognizer fields
     /// (smoothing preset, pinch thresholds) by the kernel.
     HandsTune(HandsTuning),
+    /// Start/stop voice capture (ABI 1.5). The platform runs the browser's
+    /// speech engine (Web Speech API in v1 — AI System spec §5); only TEXT
+    /// transcripts cross into the kernel, never audio — the mirror of the
+    /// camera privacy boundary. Requires `VoiceInput`.
+    VoiceCapture {
+        start: bool,
+    },
     // ai
     AiPrompt {
         agent: AgentId,
@@ -247,6 +256,21 @@ pub enum KernelEvent {
     RawHands {
         data: Vec<f32>,
         hands: u8,
+    },
+    /// Speech-engine state (ABI 1.5). `listening` while capture runs;
+    /// `available = false` means the engine cannot run at all (unsupported
+    /// browser, mic denied) and `reason` explains it to the user.
+    VoiceStatus {
+        listening: bool,
+        available: bool,
+        reason: String,
+    },
+    /// A speech transcript slice (ABI 1.5): interim results stream with
+    /// `is_final = false` for real-time display and are superseded by the
+    /// final utterance text (UI spec §2.4 — voice never acts invisibly).
+    VoiceTranscript {
+        text: String,
+        is_final: bool,
     },
     Key {
         code: u32,
