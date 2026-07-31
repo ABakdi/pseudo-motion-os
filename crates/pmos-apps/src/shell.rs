@@ -284,6 +284,7 @@ impl Shell {
             }
         }
         if !self.themed {
+            theme::install_fonts(ctx);
             theme::apply(ctx);
             self.themed = true;
         }
