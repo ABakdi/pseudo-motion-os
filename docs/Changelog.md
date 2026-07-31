@@ -12,6 +12,17 @@ Entry format:
 
 ---
 
+## [2026-07-31] — Milestone 8: browser app, desktop scaffold, CI and release
+### Code
+- Browser app: egui chrome + a sandboxed DOM iframe overlaid by the platform on the window's content rect (position synced every frame); embed-refusal caveat surfaced in the UI. Known z-order limitation documented (iframe stacks above the canvas).
+- `crates/pmos-desktop`: Tauri 2 scaffold wrapping the same `dist/` bundle — outside the workspace so native GUI deps never break `cargo test --workspace`.
+- Release pipeline: `wasm-opt -z` via trunk; the bundle is **6.5 MB wasm / ~6.6 MB total** (51 MB debug).
+- `.github/workflows/ci.yml`: tests + wasm check on every push/PR; on master, release build (`--public-url /pseudo-motion-os/`) deployed to GitHub Pages.
+### Specs
+- [[Demo]] (new): the scripted five-minute golden path with speaker lines and fallbacks.
+- [[Running Locally]]: release/Pages/Tauri build instructions; README links the live URL and demo script.
+- [[Todo]]: M8 done — the roadmap's core is complete; remaining carried items are annotated in place.
+
 ## [2026-07-31] — Milestone 7: physics on the stage and the ray tracer
 ### Code
 - `pmos-kernel/phys`: rapier3d at a fixed 120 Hz with an accumulator; 8 palette-colored cube/sphere props on a floor collider; ray-picking; grab as a critically-damped spring force on a still-dynamic body (collisions resolve mid-grab, release inherits velocity → real throwing); 2 tests.

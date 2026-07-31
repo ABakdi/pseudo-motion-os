@@ -11,6 +11,9 @@ an Obsidian vault covering [architecture](docs/Architecture.md),
 and [the Conjure app DSL](<docs/App DSL.md>).
 **Roadmap:** [`docs/Todo.md`](docs/Todo.md) · **History:** [`docs/Changelog.md`](docs/Changelog.md)
 
+**Live build:** pushed to GitHub Pages by CI on every master commit (enable Pages → GitHub Actions in repo settings): `https://abakdi.github.io/pseudo-motion-os/`
+**Demo script:** [`docs/Demo.md`](docs/Demo.md) — the five-minute golden path.
+
 ## Development
 
 Full guide: [`docs/Running Locally.md`](<docs/Running Locally.md>).

@@ -95,12 +95,12 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 - [ ] *(carried)* **Notes 3D graph view** — still pending; wants notes-as-bodies on the stage.
 - *Verification:* native tests green; browser run (props visible/grabbable, RT window) awaits the user — the extension disconnected during final checks.
 
-## M8 — Polish, Browser App, Desktop & Release
-- [ ] **Browser app** — best-effort iframe browsing (browser mode). *(Spec: [[Pseudo Motion OS]] §4.8 caveats)*
-- [ ] **Tauri shell** — `pmos-desktop` crate, native FS mounts, child-webview browsing.
-- [ ] **Performance pass** — frame budget audit, wasm size (`opt-level=s`, `wasm-opt`), load time.
-- [ ] **Demo golden path** — scripted demo: launch → gestures → conjure an app by voice → manipulate it in 3D.
-- [ ] **Deploy** — static hosting + CI (build, test, deploy on push).
+## M8 — Polish, Browser App, Desktop & Release ✅ *(deferrals annotated)*
+- [x] **Browser app** — egui chrome (URL bar, honest embed-refusal notice) + a real DOM iframe the platform overlays on the window's content rect each frame (sandboxed; egui points ≡ CSS px). Known limitation documented: the iframe always stacks above the canvas, so overlapping egui windows render beneath it; real browsing lands with Tauri child webviews. *(Spec: [[Pseudo Motion OS]] §4.8 caveats)*
+- [x] **Tauri shell** — `crates/pmos-desktop` scaffold (Tauri 2, wraps the same `dist/`), deliberately **outside the workspace** so native GUI deps never gate the web build; build steps in [[Running Locally]]. *(Untested here — needs webkit2gtk; native FS mounts + child-webview browsing remain follow-ups.)*
+- [x] **Performance pass** — release bundle with `wasm-opt -z` + LTO + `opt-level=s`: **6.5 MB wasm** (from 51 MB debug), ~6.6 MB total static bundle.
+- [x] **Demo golden path** — [[Demo]]: the scripted five-minute showcase with speaker lines and fallbacks.
+- [x] **Deploy** — GitHub Actions CI: tests + wasm check on every push; release build deployed to GitHub Pages from master (`--public-url /pseudo-motion-os/`). *(One-time repo setting needed: Pages → Source → GitHub Actions.)*
 
 ---
 

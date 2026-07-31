@@ -54,6 +54,20 @@ Open **http://127.0.0.1:8080**. You should see the landing page (starfield, logo
 ```sh
 cd crates/pmos-web
 trunk build --release        # output in dist/ — static files, host anywhere
+# for GitHub Pages project sites:
+trunk build --release --public-url /pseudo-motion-os/
+```
+
+CI (`.github/workflows/ci.yml`) runs tests + the wasm check on every push and deploys the release bundle to GitHub Pages from master.
+
+### Desktop (Tauri) build
+
+`crates/pmos-desktop` wraps the same `dist/` bundle in a native window. It is **outside the workspace** (native GUI system deps). On a machine with them (Linux: `webkit2gtk-4.1`, `libayatana-appindicator`; or Windows/macOS):
+
+```sh
+cargo install tauri-cli
+cd crates/pmos-desktop
+cargo tauri build            # runs trunk build --release first, then bundles
 ```
 
 ## 4. Useful during development
