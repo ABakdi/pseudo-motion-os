@@ -37,7 +37,7 @@ pub struct Physics {
 
 impl Physics {
     pub fn new() -> Self {
-        let mut bodies = RigidBodySet::new();
+        let bodies = RigidBodySet::new();
         let mut colliders = ColliderSet::new();
 
         // The stage floor (matches the rendered grid plane at y = 0).
@@ -48,7 +48,10 @@ impl Physics {
                 .build(),
         );
 
-        let mut phys = Self {
+        // The stage boots CLEAN (user decision 2026-08-01) — no scattered
+        // demo props. `spawn_prop` stays: notes-as-bodies, conjured objects,
+        // and the future stage_spawn tool all use it.
+        Self {
             pipeline: PhysicsPipeline::new(),
             islands: IslandManager::new(),
             broad_phase: DefaultBroadPhase::new(),
@@ -66,30 +69,7 @@ impl Physics {
             accumulator: 0.0,
             props: Vec::new(),
             grabbed: None,
-        };
-
-        // Stage furniture: a loose little pile to play with (UI spec §3.4).
-        let palette: [[f32; 3]; 5] = [
-            [0.43, 0.91, 1.00], // ion cyan
-            [0.75, 0.52, 0.99], // nebula violet
-            [1.00, 0.62, 0.42], // ember
-            [0.55, 0.95, 0.65], // mint
-            [0.95, 0.85, 0.45], // gold
-        ];
-        let spots: [(f32, f32, f32, u8, f32); 8] = [
-            (-2.0, 0.6, -1.0, 0, 0.5),
-            (-1.9, 1.8, -1.1, 0, 0.45),
-            (2.2, 0.5, -0.8, 1, 0.5),
-            (2.4, 1.6, -0.9, 1, 0.4),
-            (0.3, 0.6, -2.6, 0, 0.55),
-            (-3.2, 0.5, 1.2, 1, 0.45),
-            (3.1, 0.6, 1.5, 0, 0.5),
-            (0.0, 2.8, -2.5, 1, 0.5),
-        ];
-        for (i, (x, y, z, shape, half)) in spots.into_iter().enumerate() {
-            phys.spawn_prop(Vec3::new(x, y, z), shape, half, palette[i % palette.len()]);
         }
-        phys
     }
 
     pub fn spawn_prop(&mut self, pos: Vec3, shape: u8, half: f32, color: [f32; 3]) {
@@ -226,9 +206,16 @@ impl Default for Physics {
 mod tests {
     use super::*;
 
+    fn with_props() -> Physics {
+        let mut p = Physics::new();
+        p.spawn_prop(Vec3::new(-2.0, 0.6, -1.0), 0, 0.5, [1.0, 0.5, 0.2]);
+        p.spawn_prop(Vec3::new(2.2, 1.5, -0.8), 1, 0.5, [0.4, 0.9, 1.0]);
+        p
+    }
+
     #[test]
     fn props_fall_and_settle_on_the_floor() {
-        let mut p = Physics::new();
+        let mut p = with_props();
         // Two simulated seconds.
         for _ in 0..120 {
             p.step(1.0 / 60.0);
@@ -244,7 +231,7 @@ mod tests {
 
     #[test]
     fn pick_hits_a_prop_from_above() {
-        let mut p = Physics::new();
+        let mut p = with_props();
         for _ in 0..240 {
             p.step(1.0 / 60.0);
         }
