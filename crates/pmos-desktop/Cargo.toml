@@ -1,0 +1,20 @@
+# The Tauri desktop shell (Architecture §9.2).
+#
+# Deliberately OUTSIDE the cargo workspace: Tauri pulls native GUI system
+# dependencies (webkit2gtk on Linux, WebView2 on Windows) that must not gate
+# the web build. Build it on a machine with those libs:
+#
+#   cd crates/pmos-web && trunk build --release      # produce dist/
+#   cd ../pmos-desktop && cargo tauri build           # (cargo install tauri-cli)
+[package]
+name = "pmos-desktop"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

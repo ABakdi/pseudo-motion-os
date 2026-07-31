@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Pseudo Motion OS",
+  "version": "0.1.0",
+  "identifier": "io.pseudomotionos.app",
+  "build": {
+    "frontendDist": "../../dist",
+    "beforeBuildCommand": "cd ../pmos-web && trunk build --release"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Pseudo Motion OS",
+        "width": 1440,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all"
+  }
+}
