@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 6);
+pub const ABI_VERSION: (u16, u16) = (1, 7);
 
 // ---------- handles ----------
 
@@ -151,6 +151,11 @@ pub enum Syscall {
     RtConfig {
         bounces: u8,
         animate: bool,
+    },
+    /// Pick the stage background preset (ABI 1.7 — UI spec §6.1):
+    /// 0 Deep Space · 1 Ember Nebula · 2 Aurora · 3 Void. Requires `SysQuery`.
+    Background {
+        style: u8,
     },
 }
 

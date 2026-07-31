@@ -6,7 +6,9 @@
 struct SkyUniforms {
     inv_rot_proj: mat4x4<f32>,
     time: f32,
-    _pad0: f32,
+    // Background preset (UI spec §6.1): 0 Deep Space · 1 Ember Nebula ·
+    // 2 Aurora · 3 Void.
+    style: f32,
     _pad1: f32,
     _pad2: f32,
 };
@@ -86,23 +88,50 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let world = u.inv_rot_proj * vec4<f32>(in.ndc, 1.0, 1.0);
     let dir = normalize(world.xyz / world.w);
 
-    // Deep-space base.
-    var col = vec3<f32>(0.012, 0.014, 0.028);
+    // Per-preset palette (UI spec §6.1).
+    let style = u32(u.style + 0.5);
+    var base = vec3<f32>(0.012, 0.014, 0.028); // deep-space blue-black
+    var neb1 = vec3<f32>(0.10, 0.16, 0.34);    // ion blue
+    var neb2 = vec3<f32>(0.22, 0.10, 0.34);    // nebula violet
+    var bandc = vec3<f32>(0.05, 0.06, 0.09);
+    var starc = vec3<f32>(0.85, 0.92, 1.0);
+    var neb_amt = 1.0;
+    var star_amt = 1.0;
+    if (style == 1u) { // Ember Nebula — warm dust
+        base = vec3<f32>(0.020, 0.010, 0.008);
+        neb1 = vec3<f32>(0.34, 0.14, 0.05);
+        neb2 = vec3<f32>(0.28, 0.07, 0.12);
+        bandc = vec3<f32>(0.09, 0.05, 0.03);
+        starc = vec3<f32>(1.0, 0.90, 0.78);
+    } else if (style == 2u) { // Aurora — green/teal curtains
+        base = vec3<f32>(0.005, 0.014, 0.013);
+        neb1 = vec3<f32>(0.05, 0.30, 0.17);
+        neb2 = vec3<f32>(0.04, 0.15, 0.30);
+        bandc = vec3<f32>(0.03, 0.08, 0.06);
+        starc = vec3<f32>(0.80, 1.0, 0.92);
+    } else if (style == 3u) { // Void — near-black minimalism
+        base = vec3<f32>(0.004, 0.004, 0.007);
+        neb_amt = 0.0;
+        bandc = vec3<f32>(0.0, 0.0, 0.0);
+        star_amt = 0.55;
+    }
+
+    var col = base;
 
     // Nebulae: two color fields, slowly drifting.
     let n1 = fbm(dir * 2.4 + vec3<f32>(u.time * 0.004, 0.0, 0.0));
     let n2 = fbm(dir * 3.1 + vec3<f32>(5.2, u.time * 0.003, 2.7));
-    col += vec3<f32>(0.10, 0.16, 0.34) * pow(n1, 2.6) * 0.9;   // ion blue
-    col += vec3<f32>(0.22, 0.10, 0.34) * pow(n2, 3.0) * 0.8;   // nebula violet
+    col += neb1 * pow(n1, 2.6) * 0.9 * neb_amt;
+    col += neb2 * pow(n2, 3.0) * 0.8 * neb_amt;
 
     // Milky band across the sphere (tilted).
     let band = exp(-pow(dot(dir, normalize(vec3<f32>(0.2, 1.0, 0.15))), 2.0) * 14.0);
-    col += vec3<f32>(0.05, 0.06, 0.09) * band * (0.5 + 0.5 * n1);
+    col += bandc * band * (0.5 + 0.5 * n1);
 
     // Star layers, brighter inside the band.
     let s = stars(dir, 34.0, u.time) + stars(dir, 61.0, u.time) * 0.6
         + stars(dir, 90.0, u.time) * 0.35;
-    col += vec3<f32>(0.85, 0.92, 1.0) * s * (0.55 + 0.7 * band);
+    col += starc * s * (0.55 + 0.7 * band) * star_amt;
 
     return vec4<f32>(col, 1.0);
 }

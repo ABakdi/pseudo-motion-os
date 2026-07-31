@@ -31,6 +31,8 @@ pub struct Gfx {
     /// Ray tracer controls (set through the RtConfig syscall).
     pub rt_bounces: u8,
     pub rt_animate: bool,
+    /// Sky background preset (Background syscall, ABI 1.7 — UI spec §6.1).
+    pub sky_style: u8,
 }
 
 struct PassBits {
@@ -604,6 +606,7 @@ impl Gfx {
             rt,
             rt_bounces: 3,
             rt_animate: true,
+            sky_style: 0,
         }
     }
 
@@ -650,10 +653,11 @@ impl Gfx {
         (near, (far - near).normalize())
     }
 
-    fn write_pass_uniforms(&self, pass: &PassBits, mat: glam::Mat4, time: f32) {
+    fn write_pass_uniforms(&self, pass: &PassBits, mat: glam::Mat4, time: f32, extra: f32) {
         let mut data = [0u8; 80];
         data[..64].copy_from_slice(cast_f32(&mat.to_cols_array()));
         data[64..68].copy_from_slice(&time.to_le_bytes());
+        data[68..72].copy_from_slice(&extra.to_le_bytes());
         self.queue.write_buffer(&pass.uniforms, 0, &data);
     }
 
@@ -680,8 +684,13 @@ impl Gfx {
         let view = frame.texture.create_view(&Default::default());
 
         let aspect = self.aspect();
-        self.write_pass_uniforms(&self.sky, self.camera.inv_rot_proj(aspect), time);
-        self.write_pass_uniforms(&self.floor, self.camera.view_proj(aspect), time);
+        self.write_pass_uniforms(
+            &self.sky,
+            self.camera.inv_rot_proj(aspect),
+            time,
+            self.sky_style as f32,
+        );
+        self.write_pass_uniforms(&self.floor, self.camera.view_proj(aspect), time, 0.0);
 
         // Props uniforms: view_proj + camera pos + light dir.
         {

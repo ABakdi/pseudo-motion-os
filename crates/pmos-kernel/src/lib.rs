@@ -442,6 +442,13 @@ impl KernelApi for Kernel {
                 }
                 Ok(Reply::None)
             }
+            Syscall::Background { style } => {
+                self.require(caller, &Capability::SysQuery)?;
+                if let Some(gfx) = self.gfx.as_mut() {
+                    gfx.sky_style = style.min(3);
+                }
+                Ok(Reply::None)
+            }
             Syscall::VoiceCapture { start } => {
                 self.require(caller, &Capability::VoiceInput)?;
                 if self.voice_directives.capture != start {
