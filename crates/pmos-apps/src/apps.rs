@@ -91,6 +91,8 @@ impl AppKind {
                 Capability::SysQuery,
                 Capability::FsRead("/settings".into()),
                 Capability::FsWrite("/settings".into()),
+                // Stage section: spawn/clear objects (ABI 1.8).
+                Capability::PhysSpawn,
             ],
             AppKind::Browser => Vec::new(),
         }
@@ -102,7 +104,6 @@ pub enum AppAction {
     LaunchConjure(String),
 }
 
-/// Per-window app state (the app's "process memory").
 /// In-browser AI performance tiers (WebLLM prebuilt model ids, ABI 1.6).
 /// Approximate one-time download sizes; the browser caches the model.
 const WEBLLM_MODELS: &[(&str, &str)] = &[
@@ -122,6 +123,10 @@ pub struct AppState {
     // files
     files_cwd: String,
     files_new_name: String,
+    files_grid: bool,
+    files_selected: Option<String>,
+    /// (path, rendered preview text) for the selected file.
+    files_preview: Option<(String, String)>,
     // notes
     notes_current: Option<String>,
     notes_buffer: String,
@@ -145,6 +150,12 @@ pub struct AppState {
     appearance_loaded: bool,
     /// Machine-probed in-browser LLM tier (/sys/llm_tier); None = not read.
     llm_tier: Option<u8>,
+    // stage (Settings → Stage, ABI 1.8)
+    stage_az: f32,
+    stage_el: f32,
+    stage_intensity: f32,
+    stage_ambient: f32,
+    stage_n: u32,
     ai_status: String,
 }
 
@@ -159,13 +170,19 @@ impl AppState {
             term_waiting_ai: false,
             files_cwd: "/".to_string(),
             files_new_name: String::new(),
+            files_grid: true,
+            files_selected: None,
+            files_preview: None,
             notes_current: None,
             notes_buffer: String::new(),
             notes_new_name: String::new(),
             notes_status: String::new(),
             notes_backlinks: Vec::new(),
             browser_input: "https://en.wikipedia.org".to_string(),
-            browser_url: String::new(),
+            // Load a known-embeddable page immediately: an empty white frame
+            // reads as "broken" (most big sites refuse iframes via
+            // X-Frame-Options, which we cannot detect cross-origin).
+            browser_url: "https://en.wikipedia.org".to_string(),
             rt_bounces: 3,
             rt_animate: true,
             ai_kind: 2,
@@ -176,6 +193,11 @@ impl AppState {
             app_scheme: 0,
             appearance_loaded: false,
             llm_tier: None,
+            stage_az: 215.0,
+            stage_el: 60.0,
+            stage_intensity: 1.0,
+            stage_ambient: 0.22,
+            stage_n: 0,
             ai_status: String::new(),
         }
     }
@@ -225,9 +247,21 @@ impl AppState {
                 self.browser_url = url;
             }
         });
-        ui.weak(
-            "⚠ many sites block being embedded — blank page = the site refused (try wikipedia.org)",
-        );
+        ui.horizontal(|ui| {
+            ui.weak("quick:");
+            for (name, url) in [
+                ("Wikipedia", "https://en.wikipedia.org"),
+                ("Hacker News", "https://news.ycombinator.com"),
+                ("OpenStreetMap", "https://www.openstreetmap.org/export/embed.html"),
+                ("MDN", "https://developer.mozilla.org"),
+            ] {
+                if ui.small_button(name).clicked() {
+                    self.browser_input = url.to_string();
+                    self.browser_url = url.to_string();
+                }
+            }
+            ui.weak("· blank page = that site refuses embedding");
+        });
         ui.add_space(2.0);
         let rect = ui.available_rect_before_wrap();
         // Reserve the area so the window keeps its size.
@@ -456,6 +490,70 @@ impl AppState {
 
     // ---------------- files ----------------
 
+    fn file_icon(name: &str, dir: bool) -> &'static str {
+        if dir {
+            return "📁";
+        }
+        match name.rsplit('.').next().unwrap_or("") {
+            "conjure" => "✨",
+            "md" => "📝",
+            "json" => "⚙",
+            "txt" => "📄",
+            "png" | "jpg" | "jpeg" | "gif" | "svg" => "🖼",
+            _ => "📄",
+        }
+    }
+
+    /// Load (or refresh) the preview for the selected path.
+    fn load_preview(&mut self, kernel: &mut dyn KernelApi, pid: Pid, path: &str) {
+        let text = match kernel.syscall(pid, Syscall::FsRead { path: path.into() }) {
+            Ok(Reply::Bytes(b)) => match String::from_utf8(b.clone()) {
+                Ok(mut s) => {
+                    if s.chars().count() > 2400 {
+                        s = s.chars().take(2400).collect::<String>() + "\n…";
+                    }
+                    s
+                }
+                Err(_) => format!("(binary · {} B)", b.len()),
+            },
+            Err(e) => format!("(unreadable: {e:?})"),
+            Ok(_) => String::new(),
+        };
+        self.files_preview = Some((path.to_string(), text));
+    }
+
+    /// Select or open (double-click) an entry from either view.
+    #[allow(clippy::too_many_arguments)]
+    fn files_entry_interact(
+        &mut self,
+        resp: &egui::Response,
+        kernel: &mut dyn KernelApi,
+        pid: Pid,
+        full: &str,
+        dir: bool,
+        action: &mut Option<AppAction>,
+    ) {
+        if resp.clicked() {
+            if dir {
+                // Single click navigates folders — the common expectation.
+                self.files_cwd = full.to_string();
+                self.files_selected = None;
+                self.files_preview = None;
+            } else {
+                self.files_selected = Some(full.to_string());
+                self.load_preview(kernel, pid, full);
+            }
+        }
+        if resp.double_clicked() && !dir && full.ends_with(".conjure") {
+            if let Ok(Reply::Bytes(b)) = kernel.syscall(pid, Syscall::FsRead { path: full.into() })
+            {
+                *action = Some(AppAction::LaunchConjure(
+                    String::from_utf8_lossy(&b).to_string(),
+                ));
+            }
+        }
+    }
+
     pub fn files_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -463,8 +561,93 @@ impl AppState {
         pid: Pid,
     ) -> Option<AppAction> {
         let mut action = None;
-        // Breadcrumbs.
+
+        // ---- Places sidebar ----
+        egui::Panel::left(egui::Id::new(("files-places", pid.0)))
+            .resizable(false)
+            .exact_size(108.0)
+            .show_inside(ui, |ui| {
+                ui.add_space(4.0);
+                ui.weak("PLACES");
+                for (icon, name, path) in [
+                    ("⌂", "Home", "/"),
+                    ("📝", "Notes", "/notes"),
+                    ("✨", "Apps", "/apps"),
+                    ("⚙", "Settings", "/settings"),
+                    ("🖥", "System", "/sys"),
+                ] {
+                    let here = self.files_cwd == path
+                        || self.files_cwd.starts_with(&format!("{path}/")) && path != "/";
+                    if ui.selectable_label(here, format!("{icon} {name}")).clicked() {
+                        self.files_cwd = path.into();
+                        self.files_selected = None;
+                        self.files_preview = None;
+                    }
+                }
+            });
+
+        // ---- Preview sidebar ----
+        if let Some(sel) = self.files_selected.clone() {
+            egui::Panel::right(egui::Id::new(("files-preview", pid.0)))
+                .resizable(true)
+                .default_size(200.0)
+                .show_inside(ui, |ui| {
+                    ui.add_space(4.0);
+                    let name = sel.rsplit('/').next().unwrap_or(&sel);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(Self::file_icon(name, false)).size(22.0),
+                        );
+                        ui.heading(name);
+                    });
+                    ui.weak(&sel);
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        if sel.ends_with(".conjure") && ui.button("▶ Launch").clicked() {
+                            if let Ok(Reply::Bytes(b)) =
+                                kernel.syscall(pid, Syscall::FsRead { path: sel.clone() })
+                            {
+                                action = Some(AppAction::LaunchConjure(
+                                    String::from_utf8_lossy(&b).to_string(),
+                                ));
+                            }
+                        }
+                        if !sel.starts_with("/sys") && ui.button("🗑 Delete").clicked() {
+                            let _ = kernel.syscall(pid, Syscall::FsDelete { path: sel.clone() });
+                            self.files_selected = None;
+                            self.files_preview = None;
+                        }
+                    });
+                    ui.separator();
+                    if let Some((_, text)) = &self.files_preview {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(text).monospace().size(11.5),
+                                )
+                                .wrap(),
+                            );
+                        });
+                    }
+                });
+        }
+
+        // ---- Toolbar ----
         ui.horizontal(|ui| {
+            let up = self.files_cwd.rsplit_once('/').map(|(p, _)| {
+                if p.is_empty() { "/".to_string() } else { p.to_string() }
+            });
+            if ui
+                .add_enabled(self.files_cwd != "/", egui::Button::new("⬆"))
+                .on_hover_text("up")
+                .clicked()
+            {
+                if let Some(parent) = up {
+                    self.files_cwd = parent;
+                    self.files_selected = None;
+                    self.files_preview = None;
+                }
+            }
             if ui.button("⌂").on_hover_text("/").clicked() {
                 self.files_cwd = "/".into();
             }
@@ -473,10 +656,20 @@ impl AppState {
             for part in cwd.split('/').filter(|p| !p.is_empty()) {
                 acc.push('/');
                 acc.push_str(part);
+                ui.weak("›");
                 if ui.button(part).clicked() {
                     self.files_cwd = acc.clone();
                 }
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let grid = self.files_grid;
+                if ui.selectable_label(!grid, "☰").on_hover_text("list").clicked() {
+                    self.files_grid = false;
+                }
+                if ui.selectable_label(grid, "⊞").on_hover_text("grid").clicked() {
+                    self.files_grid = true;
+                }
+            });
         });
         ui.separator();
 
@@ -493,70 +686,118 @@ impl AppState {
             }
         };
 
-        let mut delete: Option<String> = None;
+        // ---- Entries (grid or list) ----
         egui::ScrollArea::vertical()
-            .max_height(ui.available_height() - 40.0)
+            .max_height(ui.available_height() - 36.0)
+            .auto_shrink([false, false])
             .show(ui, |ui| {
                 if entries.is_empty() {
                     ui.weak("(empty)");
                 }
-                for e in &entries {
-                    let full = if self.files_cwd == "/" {
-                        format!("/{}", e.name)
+                let cwd = self.files_cwd.clone();
+                let full_of = |name: &str| {
+                    if cwd == "/" {
+                        format!("/{name}")
                     } else {
-                        format!("{}/{}", self.files_cwd, e.name)
-                    };
-                    ui.horizontal(|ui| {
-                        let label = if e.dir {
-                            format!("📁 {}", e.name)
-                        } else if e.name.ends_with(".conjure") {
-                            format!("✨ {}", e.name)
-                        } else if e.name.ends_with(".md") {
-                            format!("📝 {}", e.name)
-                        } else {
-                            format!("📄 {}", e.name)
-                        };
-                        if ui.button(label).clicked() {
-                            if e.dir {
-                                self.files_cwd = full.clone();
-                            } else if e.name.ends_with(".conjure") {
-                                if let Ok(Reply::Bytes(b)) =
-                                    kernel.syscall(pid, Syscall::FsRead { path: full.clone() })
-                                {
-                                    action = Some(AppAction::LaunchConjure(
-                                        String::from_utf8_lossy(&b).to_string(),
-                                    ));
-                                }
+                        format!("{cwd}/{name}")
+                    }
+                };
+                if self.files_grid {
+                    ui.horizontal_wrapped(|ui| {
+                        for e in &entries {
+                            let full = full_of(&e.name);
+                            let selected = self.files_selected.as_deref() == Some(&full);
+                            let (rect, resp) = ui.allocate_exact_size(
+                                egui::vec2(86.0, 78.0),
+                                egui::Sense::click(),
+                            );
+                            if selected || resp.hovered() {
+                                ui.painter().rect_filled(
+                                    rect,
+                                    8.0,
+                                    if selected {
+                                        crate::theme::accent_a().gamma_multiply(0.16)
+                                    } else {
+                                        egui::Color32::from_white_alpha(8)
+                                    },
+                                );
                             }
-                        }
-                        if !e.dir {
-                            ui.weak(format!("{} B", e.size));
-                        }
-                        if !full.starts_with("/sys")
-                            && ui.small_button("🗑").on_hover_text("delete").clicked()
-                        {
-                            delete = Some(full.clone());
+                            ui.painter().text(
+                                rect.center_top() + egui::vec2(0.0, 26.0),
+                                egui::Align2::CENTER_CENTER,
+                                Self::file_icon(&e.name, e.dir),
+                                egui::FontId::proportional(26.0),
+                                crate::theme::INK,
+                            );
+                            let mut label = e.name.clone();
+                            if label.chars().count() > 11 {
+                                label = label.chars().take(10).collect::<String>() + "…";
+                            }
+                            ui.painter().text(
+                                rect.center_bottom() - egui::vec2(0.0, 14.0),
+                                egui::Align2::CENTER_CENTER,
+                                label,
+                                egui::FontId::proportional(11.5),
+                                crate::theme::INK,
+                            );
+                            let resp = resp.on_hover_text(&e.name);
+                            self.files_entry_interact(
+                                &resp, kernel, pid, &full, e.dir, &mut action,
+                            );
                         }
                     });
+                } else {
+                    for e in &entries {
+                        let full = full_of(&e.name);
+                        let selected = self.files_selected.as_deref() == Some(&full);
+                        ui.horizontal(|ui| {
+                            let resp = ui.selectable_label(
+                                selected,
+                                format!("{} {}", Self::file_icon(&e.name, e.dir), e.name),
+                            );
+                            if !e.dir {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| ui.weak(format!("{} B", e.size)),
+                                );
+                            }
+                            self.files_entry_interact(
+                                &resp, kernel, pid, &full, e.dir, &mut action,
+                            );
+                        });
+                    }
                 }
             });
-        if let Some(path) = delete {
-            let _ = kernel.syscall(pid, Syscall::FsDelete { path });
-        }
+
+        // ---- Footer: create ----
         ui.separator();
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.files_new_name)
-                    .hint_text("new folder name")
-                    .desired_width(160.0),
+                    .hint_text("name…")
+                    .desired_width(150.0),
             );
-            if ui.button("＋ folder").clicked() && !self.files_new_name.trim().is_empty() {
-                let path = if self.files_cwd == "/" {
-                    format!("/{}", self.files_new_name.trim())
+            let name = self.files_new_name.trim().to_string();
+            let target = |n: &str| {
+                if self.files_cwd == "/" {
+                    format!("/{n}")
                 } else {
-                    format!("{}/{}", self.files_cwd, self.files_new_name.trim())
-                };
-                let _ = kernel.syscall(pid, Syscall::FsMkdir { path });
+                    format!("{}/{n}", self.files_cwd)
+                }
+            };
+            if ui.button("＋ folder").clicked() && !name.is_empty() {
+                let _ = kernel.syscall(pid, Syscall::FsMkdir { path: target(&name) });
+                self.files_new_name.clear();
+            }
+            if ui.button("＋ file").clicked() && !name.is_empty() {
+                let n = if name.contains('.') { name.clone() } else { format!("{name}.md") };
+                let _ = kernel.syscall(
+                    pid,
+                    Syscall::FsWrite {
+                        path: target(&n),
+                        bytes: Vec::new(),
+                    },
+                );
                 self.files_new_name.clear();
             }
         });
@@ -958,8 +1199,92 @@ impl AppState {
         self.appearance_ui(ui, kernel, pid);
         ui.add_space(10.0);
         ui.separator();
+        self.stage_ui(ui, kernel, pid);
+        ui.add_space(10.0);
+        ui.separator();
         ui.weak("Gestures are tuned in the Hand Tracker app.");
         ui.weak("Stage camera: drag = orbit · wheel = zoom · Home = reset");
+    }
+
+    /// Settings → Stage (ABI 1.8): spawn/clear physics objects, sun control.
+    /// The AI has the same powers as tools — ask it to build something.
+    fn stage_ui(&mut self, ui: &mut egui::Ui, kernel: &mut dyn KernelApi, pid: Pid) {
+        const PALETTE: [[f32; 3]; 5] = [
+            [0.43, 0.91, 1.00],
+            [0.75, 0.52, 0.99],
+            [1.00, 0.62, 0.42],
+            [0.55, 0.95, 0.65],
+            [0.95, 0.85, 0.45],
+        ];
+        ui.heading("Stage");
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let mut spawn = |shape: u8, n: &mut u32| {
+                let i = *n;
+                *n += 1;
+                // Deterministic scatter: no RNG needed, still looks organic.
+                let x = ((i * 37 + 11) % 13) as f32 * 0.5 - 3.0;
+                let z = ((i * 53 + 7) % 11) as f32 * 0.5 - 2.5;
+                let _ = kernel.syscall(
+                    pid,
+                    Syscall::StageSpawn {
+                        shape,
+                        pos: [x, 3.5, z],
+                        half: 0.45,
+                        color: PALETTE[(i % 5) as usize],
+                    },
+                );
+            };
+            if ui.button("🧊 Drop a cube").clicked() {
+                spawn(0, &mut self.stage_n);
+            }
+            if ui.button("🔮 Drop a sphere").clicked() {
+                spawn(1, &mut self.stage_n);
+            }
+            if ui.button("🧹 Clear stage").clicked() {
+                let _ = kernel.syscall(pid, Syscall::StageClear);
+            }
+        });
+        ui.weak("objects are physical — grab with ✊ or mouse, throw them around");
+        ui.add_space(6.0);
+        let mut light_changed = false;
+        egui::Grid::new("stage-light")
+            .num_columns(2)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Sun azimuth");
+                light_changed |= ui
+                    .add(egui::Slider::new(&mut self.stage_az, 0.0..=360.0).suffix("°"))
+                    .changed();
+                ui.end_row();
+                ui.label("Sun elevation");
+                light_changed |= ui
+                    .add(egui::Slider::new(&mut self.stage_el, 10.0..=85.0).suffix("°"))
+                    .changed();
+                ui.end_row();
+                ui.label("Intensity");
+                light_changed |= ui
+                    .add(egui::Slider::new(&mut self.stage_intensity, 0.0..=2.0))
+                    .changed();
+                ui.end_row();
+                ui.label("Ambient");
+                light_changed |= ui
+                    .add(egui::Slider::new(&mut self.stage_ambient, 0.0..=0.8))
+                    .changed();
+                ui.end_row();
+            });
+        if light_changed {
+            let (az, el) = (self.stage_az.to_radians(), self.stage_el.to_radians());
+            let _ = kernel.syscall(
+                pid,
+                Syscall::StageLight {
+                    dir: [el.cos() * az.cos(), -el.sin(), el.cos() * az.sin()],
+                    intensity: self.stage_intensity,
+                    ambient: self.stage_ambient,
+                },
+            );
+        }
+        ui.weak("or ask the AI: \"build me a little tower\" · \"make it sunset\"");
     }
 
     /// Settings → Appearance (UI spec §6.1): stage background + color scheme,
