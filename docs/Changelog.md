@@ -12,6 +12,17 @@ Entry format:
 
 ---
 
+## [2026-07-31] — AI with zero setup: in-browser WebLLM becomes the default provider
+### Code
+- ABI 1.6: provider kind 2 = in-browser WebLLM; `AiChunk` deltas starting with `'\r'` REPLACE accumulated text (transient progress lines that never pollute history).
+- `pmos-kernel/ai.rs`: default config is now WebLLM Balanced (Llama-3.2-1B) — "no AI provider configured" is gone; kind-2 requests carry only model+messages (no URL/key); `'\r'` handled in the accumulator so history stays clean.
+- `pmos-web/webllm.js` (new): lazy-loads @mlc-ai/web-llm from CDN on first prompt, streams OpenAI-style deltas through the existing bridge, serializes requests, maps failures to actionable errors; model download progress streams as `'\r'` chunks.
+- Settings → AI: "In-browser (free, no key)" is the first provider option with three performance tiers (Fast ~0.6 GB / Balanced ~0.9 GB / Quality ~1.9 GB radio picker) replacing the URL/model/key fields; remote providers unchanged one dropdown away.
+- Palette, terminal: `'\r'`-replace rendering for streamed lines.
+### Specs
+- [[AI System]] §2: WebLLM row promoted from v2 to implemented default, tiers and honest App-Smith-quality note documented.
+- [[Todo]]: zero-setup AI logged under post-release.
+
 ## [2026-07-31] — The assistant gets hands: tool use over the syscall ABI
 ### Code
 - `pmos-kernel/ai.rs`: new System Assistant prompt — prompt-level tool protocol (`@@tool` / `@@tool_result`), chosen over provider-native function calling so one mechanism works on Anthropic, OpenAI-compatible, and local models; "you cannot run system commands" is gone.
