@@ -12,6 +12,16 @@ Entry format:
 
 ---
 
+## [2026-07-31] — The assistant gets hands: tool use over the syscall ABI
+### Code
+- `pmos-kernel/ai.rs`: new System Assistant prompt — prompt-level tool protocol (`@@tool` / `@@tool_result`), chosen over provider-native function calling so one mechanism works on Anthropic, OpenAI-compatible, and local models; "you cannot run system commands" is gone.
+- Palette: parses trailing `@@tool` lines from replies (fence-tolerant), strips them from display, logs every call as a `🔧 tool args` line, enforces a 4-call budget per request, and feeds `@@tool_result` back to continue the stream; 3 extraction tests.
+- Shell `execute_tool`: runs `sys_query`/`fs_list`/`fs_read`(4 KB cap)/`fs_write`/`app_open` as an ordinary ABI client — every tool call passes the kernel's capability checks like any process's syscall; writes raise a "🤖 assistant wrote …" toast (Tier-1 transparency).
+- Voice→AI now closes the loop: hold 🤙, ask "what's in my notes?", the assistant lists /notes and answers.
+### Specs
+- [[AI System]] §3.1 (new): the v1 tool implementation, its transparency rules, and honest limitations (palette-only execution, no Tier-2 tools yet, /sys/ai/log pending).
+- [[Todo]]: assistant tool use logged under post-release.
+
 ## [2026-07-31] — Voice works in any browser: Whisper in-browser becomes the default engine
 ### Code
 - `pmos-web/whisper-worker.js` (new): `whisper-tiny` via transformers.js — WebGPU with WASM fallback, multilingual model auto-picked from `navigator.language`, ~40 MB model downloaded once and cached, transcription fully on-device. Motivation: Web Speech needs a Google/Apple backend that Brave and distro Chromium don't ship (user-reported).

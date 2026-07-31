@@ -63,6 +63,14 @@ timer:schedule            → schedule(task, when)       // reminders, backgroun
 
 Dispatch flow: model emits tool call → kernel checks capability *again* at execution (defense in depth) → risk-tier check (§6) → execute → result returned to the model → stream continues. All tool calls are logged to `/sys/ai/log/` (inspectable in the terminal — transparency is a feature).
 
+### 3.1 v1 implementation *(2026-07-31)*
+
+The System Assistant acts through a **prompt-level tool protocol** rather than provider-native function calling — one mechanism that works identically on Anthropic, OpenAI-compatible, and local (Ollama/LM Studio) models:
+
+- The model ends its reply with one line: `@@tool {"tool":"fs_read","args":{"path":"/notes/todo.md"}}`. The shell parses it, executes it **as an ordinary ABI client through capability-checked syscalls** (the kernel dispatcher re-checks every call — defense in depth held for free), and sends the outcome back as an `@@tool_result {json}` message; the model then continues. Budget: **4 tool calls per user request**.
+- v1 tools: `sys_query` · `fs_list` · `fs_read` (truncated at 4 KB) · `fs_write` · `app_open`. All read/reversible-write (Tier 0–1): reads are silent, every call shows a `🔧 tool args` line in the palette, and writes additionally raise a toast — **nothing acts invisibly**. No delete/destructive tools are exposed (Tier 2 waits for the consent sheet).
+- Known limitations: tool calls execute only from the **palette** surface (the terminal's `>` mode shares the agent but doesn't run tools); provider-native function calling and the capability→schema derivation stay future work, as do `/sys/ai/log` (needs the synthetic-dir VFS extension) and `notes_search`/`stage_spawn`/`schedule` tools.
+
 ---
 
 ## 4. App generation workflow (App Smith)
