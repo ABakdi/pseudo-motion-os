@@ -44,6 +44,9 @@ struct Voice {
     /// Whether this session produced any transcript at all — a session that
     /// ends without one must still say so, never end silently.
     got_speech: bool,
+    /// Engine progress shown while listening ("downloading speech model… 43%",
+    /// "transcribing…") — Whisper's first run downloads a model.
+    engine_note: String,
 }
 
 pub struct Palette {
@@ -107,6 +110,12 @@ impl Palette {
             self.lines.push(Line::System(format!("⚠ voice: {reason}")));
             return Vec::new();
         }
+        if listening {
+            // Engine progress while live (model download, transcribing).
+            self.voice.engine_note = reason.to_string();
+            return Vec::new();
+        }
+        self.voice.engine_note.clear();
         if was && !listening {
             if !reason.is_empty() {
                 self.lines.push(Line::System(format!("🎤 {reason}")));
@@ -338,7 +347,9 @@ impl Palette {
                                     egui::Color32::from_rgb(0xff, 0x5c, 0x7a).gamma_multiply(a),
                                     "● 🎤 listening",
                                 );
-                                ui.weak(if self.voice.interim.is_empty() {
+                                ui.weak(if !self.voice.engine_note.is_empty() {
+                                    self.voice.engine_note.as_str()
+                                } else if self.voice.interim.is_empty() {
                                     "— speak, your words appear live · Esc cancels"
                                 } else {
                                     "— pause to run it"
