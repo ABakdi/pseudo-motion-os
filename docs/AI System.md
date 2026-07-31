@@ -102,9 +102,11 @@ mic (getUserMedia / Web Speech API)
   → G8-hold path bypasses routing entirely → raw transcript → notes inbox ([[Notes System#5. Voice capture]])
 ```
 
-- v1 STT: **Web Speech API** — pragmatic, zero-download; effectively Chrome-only and cloud-processed (documented limitation).
+- v1 STT: **Web Speech API** — pragmatic, zero-download, **free** (no API key); effectively Chrome-only and cloud-processed (documented limitation). *Implemented 2026-07-31:* `speech.js` runs one utterance per 🤙-hold (`continuous=false`, `interimResults=true`); the kernel drives it via the `VoiceCapture` syscall / `VoiceStatus`+`VoiceTranscript` events (ABI 1.5, `voice:input` capability). **Only text crosses into the kernel — audio never does**, the mirror of the camera landmarks-only boundary.
+- Routing (implemented): transcripts run through the *same* palette brain as typed input — app names (with spoken "open/launch/start the …" verbs stripped) launch apps, `make/create/build …` conjures via the App Smith, and anything unrecognized goes to the System Assistant, because spoken input is conversational (typed input keeps the explicit `>` prefix and the "unknown command" hint).
 - v2 STT: **Whisper in-browser** (transformers.js / WebGPU worker) behind the same `SpeechIn` trait — private and cross-browser, at the cost of a model download.
 - TTS (optional, off by default): Web Speech synthesis for assistant replies in presentation mode.
+- Still deferred: the G8-hold **voice note** path into the notes inbox.
 
 ---
 

@@ -61,7 +61,7 @@ One-Euro smoothing (§2) remains the base layer beneath all three. Tuning: `HOLD
 | G5 | **Open-palm hold** ✋ (0.6 s) | all five extended, palm to camera | Open the **Launcher** | "Show me everything" — palm-out is a natural stop/attention pose; the hold prevents accidental fires while gesturing in speech. |
 | G6 | **Swipe** 🖐️→ | open hand, lateral motion > 0.7 m/s | Switch virtual desktop (left/right); in scrollable context: page | Broad motion for broad navigation; the velocity floor separates it from repositioning. |
 | G7 | **Two-finger drag** ✌️+move | index+middle extended, move vertically | Scroll focused view | Direct steal from trackpad muscle memory. Palm-tilt scroll is an optional alt mode in settings. |
-| G8 | **Call sign** 🤙 | thumb+pinky extended, others curled | **Tap (< 0.4 s): toggle the voice command palette.** **Hold (≥ 1.2 s): start a voice note** → release ends capture, transcript lands in [[Notes System#Voice capture]] inbox | The "call me" sign is the most iconic "talk" gesture that exists; tap-vs-hold gives palette and note capture one memorable anchor. Topologically unique (only pose using the pinky alone with thumb). |
+| G8 | **Call sign** 🤙 | thumb+pinky extended, others curled | **Tap (< 0.5 s): toggle the command palette.** **Hold (≥ 0.6 s): voice command mode** — palette opens listening, the transcript streams live into the input line, end of utterance executes it *(implemented 2026-07-31)*. The dwell makes the voice trigger impossible to hit by accident. Voice **notes** (long dictation → notes inbox, [[Notes System#Voice capture]]) remain a follow-up on this same anchor. | The "call me" sign is the most iconic "talk" gesture that exists; tap-vs-hold gives palette and voice capture one memorable anchor. Topologically unique (only pose using the pinky alone with thumb). |
 | G9 | **Thumbs up / down** 👍👎 (0.4 s hold) | thumb extended up/down, fist otherwise | Confirm / dismiss the focused dialog, consent sheet, or AI suggestion | Universally understood judgment pair; used constantly in the AI-approval flow ([[UI#5. Consent & Safety UI]]). |
 
 **Deliberately absent:** finger-counting menus (undiscoverable), air-tap without pinch (no tactile self-confirmation), wrist-rotation dials (fatiguing), face/head input (out of scope).
@@ -92,7 +92,7 @@ Never required; always a superset of a one-hand or mouse path.
 |---|---|---|
 | Pinch enter / exit distance | 25 mm / 40 mm | 15–60 |
 | Open-palm launcher hold | 0.6 s | 0.3–1.5 |
-| 🤙 tap vs. hold boundary | 0.4 s / 1.2 s | fixed ratio, scalable |
+| 🤙 tap vs. hold boundary | 0.5 s / 0.6 s | fixed ratio, scalable |
 | Swipe velocity floor | 0.7 m/s | 0.4–1.2 |
 | Dwell-as-hover | 800 ms | 400–2000 |
 | Control box size | 40×25 cm | resizable in calibration UI |

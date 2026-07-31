@@ -1,4 +1,4 @@
--+# Todo — Roadmap
+# Todo — Roadmap
 **Pseudo Motion OS** · part of [[Pseudo Motion OS]]
 
 Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pending. Every completed item gets its [[Changelog]] entry. Specs referenced per task.
@@ -105,7 +105,8 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 ## Post-release — Field-testing stabilization
 *Bugs and tuning found by using the OS for real, after the roadmap's core shipped.*
 
-- [x] **Cursor stabilization** — fixed the cursor teleporting on pinch/fist: the anchor used to switch landmarks per pose (index tip ↔ palm), so gesturing moved the cursor at the exact moment of commit. Researched and specced the proper approach ([[Hand Gestures#2.1 Cursor stabilization|spec §2.1]]): one articulation-invariant anchor (palm centroid — wrist + MCP knuckles, the same stability MediaPipe's palm detector relies on), a commit lock with a 12 pt soft deadband engaging the instant the pinch starts forming (Ultraleap TouchFree's pattern), and ~80 ms release easing so letting go never jumps either. 4 native tests (pose-switch invariance, sub-deadzone freeze, drag follow-through, release easing). *(Pending user verification live.)*
+- [x] **Cursor stabilization** — fixed the cursor teleporting on pinch/fist: the anchor used to switch landmarks per pose (index tip ↔ palm), so gesturing moved the cursor at the exact moment of commit. Researched and specced the proper approach ([[Hand Gestures#2.1 Cursor stabilization|spec §2.1]]): one articulation-invariant anchor (palm centroid — wrist + MCP knuckles, the same stability MediaPipe's palm detector relies on), a commit lock with a 12 pt soft deadband engaging the instant the pinch starts forming (Ultraleap TouchFree's pattern), and ~80 ms release easing so letting go never jumps either. 4 native tests (pose-switch invariance, sub-deadzone freeze, drag follow-through, release easing). *(User-verified: much better; deadband tuning to revisit.)*
+- [x] **Voice command palette** — 🤙 **held ≥ 0.6 s** (deliberate dwell — can't fire by accident; tap still toggles the text palette) opens the palette in voice mode: live transcript streams into the input line as you speak, end of utterance executes through the same routing as typed input (apps → launch with spoken "open the …" verbs handled, `make …` → App Smith, everything else → System Assistant). Engine: **Web Speech API** — free, zero-download (AI System spec §5 v1); `speech.js` + `VoiceCapture` syscall + `VoiceStatus`/`VoiceTranscript` events (ABI 1.5, `voice:input` capability); **text-only kernel boundary** — audio never crosses. Esc cancels; engine errors surface in the palette (mic denied, unsupported browser, offline). 1 native test (capability gating + directive generations). *(Deferred: voice notes → notes inbox; Whisper-in-browser v2.)*
 
 ---
 

@@ -12,6 +12,18 @@ Entry format:
 
 ---
 
+## [2026-07-31] — Voice command palette: 🤙 hold, live transcript, free Web Speech engine
+### Code
+- ABI 1.5: `VoiceCapture{start}` syscall, `VoiceStatus`/`VoiceTranscript` events, `voice:input` capability (granted to the shell).
+- `pmos-kernel`: `VoiceDirectives` (generation-counted, same contract as hands), `voice_status`/`voice_transcript` platform entry points; engine self-termination syncs capture intent without re-dispatch; capability-gating test.
+- `pmos-web/speech.js` (new): Web Speech API wrapper — free, zero-download, no key; one utterance per activation, interim results for real-time text, mapped error reasons (mic denied / unsupported / offline); **only text reaches the kernel, audio never does** (mirror of the camera landmarks-only rule).
+- Shell: 🤙 tap (< 0.5 s) still toggles the palette; 🤙 **hold ≥ 0.6 s** — a deliberate dwell that can't fire accidentally — opens the palette listening.
+- Palette: voice mode with pulsing 🎤 indicator, live interim transcript streaming into the input line, Esc cancel; one routing brain for typed + spoken input — spoken launch verbs ("open the terminal") stripped for app matching, unrecognized speech flows to the System Assistant instead of "unknown command".
+### Specs
+- [[Hand Gestures]] G8 + §6: tap/hold boundary now 0.5 s / 0.6 s; hold = voice command mode (implemented); voice *notes* remain a follow-up.
+- [[AI System]] §5: v1 pipeline marked implemented (engine, ABI surface, routing, text-only boundary); Whisper stays the v2 path.
+- [[Todo]]: voice command palette logged under post-release; cursor stabilization marked user-verified.
+
 ## [2026-07-31] — Cursor stabilization: no more jumping on pinch/fist
 ### Specs
 - [[Hand Gestures]] §2.1 (new): the researched stabilization design — one articulation-invariant anchor (palm centroid: wrist + MCP knuckles; fingertip anchors rejected on principle since every gesture *is* finger motion), a commit lock with a 12 pt soft radial deadband that engages the instant a pinch starts forming, and ~80 ms release easing; sources cited (MediaPipe palm-stability rationale, Ultraleap TouchFree interaction settings and pinch hysteresis).
