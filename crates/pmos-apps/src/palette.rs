@@ -215,10 +215,15 @@ impl Palette {
     pub fn on_chunk(&mut self, agent: AgentId, text: &str, done: bool) -> Vec<PaletteOutcome> {
         let mut out = Vec::new();
         if agent == AGENT_ASSISTANT {
+            // '\r' deltas replace the line (ABI 1.6 — transient progress).
             if let Some(Line::Assistant(s)) = self.lines.last_mut() {
-                s.push_str(text);
+                match text.strip_prefix('\r') {
+                    Some(rest) => *s = rest.to_string(),
+                    None => s.push_str(text),
+                }
             } else {
-                self.lines.push(Line::Assistant(text.to_string()));
+                self.lines
+                    .push(Line::Assistant(text.trim_start_matches('\r').to_string()));
             }
             if done {
                 self.assistant_streaming = false;
@@ -258,7 +263,10 @@ impl Palette {
                 self.smith = Smith::default();
                 return out;
             }
-            self.smith.buf.push_str(text);
+            match text.strip_prefix('\r') {
+                Some(rest) => self.smith.buf = rest.to_string(),
+                None => self.smith.buf.push_str(text),
+            }
             if done {
                 out.extend(self.finish_conjure());
             }

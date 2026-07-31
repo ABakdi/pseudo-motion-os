@@ -96,6 +96,14 @@ pub enum AppAction {
 }
 
 /// Per-window app state (the app's "process memory").
+/// In-browser AI performance tiers (WebLLM prebuilt model ids, ABI 1.6).
+/// Approximate one-time download sizes; the browser caches the model.
+const WEBLLM_MODELS: &[(&str, &str)] = &[
+    ("Fast — ~0.6 GB download", "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"),
+    ("Balanced — ~0.9 GB download", "Llama-3.2-1B-Instruct-q4f16_1-MLC"),
+    ("Quality — ~1.9 GB download", "Qwen2.5-3B-Instruct-q4f16_1-MLC"),
+];
+
 pub struct AppState {
     pub kind: AppKind,
     pub hand_tracker: crate::hand_tracker::HandTrackerState,
@@ -147,9 +155,9 @@ impl AppState {
             browser_url: String::new(),
             rt_bounces: 3,
             rt_animate: true,
-            ai_kind: 0,
+            ai_kind: 2,
             ai_base: String::new(),
-            ai_model: "claude-sonnet-4-5".to_string(),
+            ai_model: WEBLLM_MODELS[1].1.to_string(),
             ai_key: String::new(),
             ai_status: String::new(),
         }
@@ -161,7 +169,11 @@ impl AppState {
             return;
         }
         if let Some(last) = self.term_log.last_mut() {
-            last.push_str(text);
+            // '\r' deltas replace the line (ABI 1.6 — transient progress).
+            match text.strip_prefix('\r') {
+                Some(rest) => *last = rest.to_string(),
+                None => last.push_str(text),
+            }
         }
         if done {
             self.term_waiting_ai = false;
@@ -816,12 +828,13 @@ impl AppState {
             .show(ui, |ui| {
                 ui.label("Provider");
                 egui::ComboBox::from_id_salt("ai-provider")
-                    .selected_text(if self.ai_kind == 0 {
-                        "Anthropic"
-                    } else {
-                        "OpenAI-compatible"
+                    .selected_text(match self.ai_kind {
+                        2 => "In-browser (free)",
+                        0 => "Anthropic",
+                        _ => "OpenAI-compatible",
                     })
                     .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.ai_kind, 2, "In-browser (free, no key)");
                         ui.selectable_value(&mut self.ai_kind, 0, "Anthropic");
                         ui.selectable_value(
                             &mut self.ai_kind,
@@ -831,35 +844,54 @@ impl AppState {
                     });
                 ui.end_row();
 
-                ui.label("Base URL");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.ai_base)
-                        .hint_text(if self.ai_kind == 0 {
-                            "default: api.anthropic.com"
-                        } else {
-                            "e.g. http://localhost:11434"
-                        })
-                        .desired_width(240.0),
-                );
-                ui.end_row();
+                if self.ai_kind == 2 {
+                    // Performance tiers instead of free-form model/key fields.
+                    if !WEBLLM_MODELS.iter().any(|(_, id)| *id == self.ai_model) {
+                        self.ai_model = WEBLLM_MODELS[1].1.to_string();
+                    }
+                    ui.label("Performance");
+                    ui.vertical(|ui| {
+                        for (label, id) in WEBLLM_MODELS {
+                            ui.radio_value(&mut self.ai_model, id.to_string(), *label);
+                        }
+                    });
+                    ui.end_row();
+                } else {
+                    ui.label("Base URL");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.ai_base)
+                            .hint_text(if self.ai_kind == 0 {
+                                "default: api.anthropic.com"
+                            } else {
+                                "e.g. http://localhost:11434"
+                            })
+                            .desired_width(240.0),
+                    );
+                    ui.end_row();
 
-                ui.label("Model");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.ai_model)
-                        .hint_text("model id")
-                        .desired_width(240.0),
-                );
-                ui.end_row();
+                    ui.label("Model");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.ai_model)
+                            .hint_text("model id")
+                            .desired_width(240.0),
+                    );
+                    ui.end_row();
 
-                ui.label("API key");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.ai_key)
-                        .password(true)
-                        .hint_text("stored locally, never displayed again")
-                        .desired_width(240.0),
-                );
-                ui.end_row();
+                    ui.label("API key");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.ai_key)
+                            .password(true)
+                            .hint_text("stored locally, never displayed again")
+                            .desired_width(240.0),
+                    );
+                    ui.end_row();
+                }
             });
+        if self.ai_kind == 2 {
+            ui.add_space(2.0);
+            ui.weak("Runs on your GPU, in the browser — free, private, works offline once");
+            ui.weak("the model is downloaded (first reply) and cached. Bigger = smarter.");
+        }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             if ui.button("Save provider").clicked() {
@@ -870,6 +902,9 @@ impl AppState {
                     api_key: self.ai_key.trim().to_string(),
                 };
                 self.ai_status = match kernel.syscall(pid, Syscall::AiConfigure(cfg)) {
+                    Ok(_) if self.ai_kind == 2 => {
+                        "✓ saved — the first reply downloads the model (watch the palette)".into()
+                    }
                     Ok(_) => {
                         "✓ saved — try `> hello` or `make me a timer` in the palette (✨)".into()
                     }
