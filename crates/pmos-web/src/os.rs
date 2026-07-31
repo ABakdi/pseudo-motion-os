@@ -372,13 +372,15 @@ impl OsApp {
         self.kernel.tick_hands(now);
 
         // Voice plumbing: engine status + transcripts in, capture intent out.
+        // Transcripts BEFORE statuses: the engine emits the final transcript
+        // then the session-end status, and the shell must see them in order.
+        for (text, is_final) in VOICE_TRANSCRIPTS.with(|q| std::mem::take(&mut *q.borrow_mut())) {
+            self.kernel.voice_transcript(text, is_final);
+        }
         for (listening, available, reason) in
             VOICE_STATUS.with(|s| std::mem::take(&mut *s.borrow_mut()))
         {
             self.kernel.voice_status(listening, available, reason);
-        }
-        for (text, is_final) in VOICE_TRANSCRIPTS.with(|q| std::mem::take(&mut *q.borrow_mut())) {
-            self.kernel.voice_transcript(text, is_final);
         }
         if self.kernel.voice_directives.generation != self.applied_voice_generation {
             self.applied_voice_generation = self.kernel.voice_directives.generation;
