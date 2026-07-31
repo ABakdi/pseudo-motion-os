@@ -12,6 +12,17 @@ Entry format:
 
 ---
 
+## [2026-07-31] — Appearance: pickable backgrounds and color schemes; selectable, copyable text
+### Code
+- Sky shader: four background presets behind one uniform (`style`) — Deep Space (default), Ember Nebula, Aurora, Void; new `Background{style}` syscall (ABI 1.7, `SysQuery`-gated) sets it live.
+- `theme.rs`: accent colors became runtime tokens (`accent_a()/accent_b()` over an atomic scheme id) with four schemes — Ion, Ember, Verdant, Rose; `set_scheme` restyles every egui style at once, so the cursor, dock, palette and selection recolor instantly.
+- Settings → Appearance: background + scheme radio pickers with color swatches, applied live and persisted to `/settings/appearance.json` through ordinary FsWrite syscalls (Settings gained scoped `/settings` fs caps + SysQuery); the shell re-applies persisted appearance at boot (retrying while OPFS loads).
+- Text: `selectable_labels` on everywhere; egui copy commands (Ctrl+C) are mirrored to the real browser clipboard via a `navigator.clipboard` bridge — egui-winit's wasm clipboard is internal-only.
+- Responsiveness: Settings content scrolls; the Notes sidebar splitter is resizable (app windows were already resizable).
+### Specs
+- [[UI]] §6.1 (new): appearance settings, schemes, selectability/clipboard behavior.
+- [[Todo]]: appearance work logged under post-release.
+
 ## [2026-07-31] — WebLLM: auto-select fp32 model variants on GPUs without shader-f16
 ### Code
 - `webllm.js`: q4f16 model builds need WebGPU's `shader-f16` feature, which many Linux Vulkan drivers lack — pipeline creation died with "Invalid ShaderModule" (user-reported on Brave/Linux). The bridge now probes adapter features up front and swaps `q4f16`→`q4f32` in the model id when f16 is unsupported, and if a driver *claims* f16 but still rejects the shaders, retries once on the fp32 variant and remembers for the session.

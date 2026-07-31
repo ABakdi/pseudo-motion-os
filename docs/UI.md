@@ -134,6 +134,15 @@ Capability requests ([[Architecture#4.7 Process & Capability Manager (`proc`)]])
 - **Motion:** 150–250 ms ease-out for all shell transitions; physics provides the rest of the life. Reduced-motion setting disables nonessential animation.
 - **Feedback for gestures:** every recognized gesture flashes a small glyph near the cursor (👌, ✊, 🤙…) — instant confirmation of *what the system saw*, which is the single most important trust feature of camera input.
 
+### 6.1 Appearance settings *(implemented 2026-07-31)*
+
+Settings → Appearance, applied live and persisted to `/settings/appearance.json` in the VFS (the shell re-applies it at boot):
+
+- **Backgrounds** — four sky-shader presets selected per-frame via a sky uniform (`Background` syscall, ABI 1.7): **Deep Space** (ion blue/violet nebulae — the default) · **Ember Nebula** (warm dust) · **Aurora** (green/teal curtains) · **Void** (near-black, sparse dim stars — the projector/minimalist option).
+- **Color schemes** — accent-pair palettes applied across every shell surface (cursor ring, dock, palette, selection, hover): **Ion** (cyan/violet) · **Ember** (amber/rose) · **Verdant** (green/sky) · **Rose** (pink/violet). The scheme is a runtime token (`theme::accent_a()/accent_b()`), so switching restyles everything instantly. *(The spec'd light theme remains future work.)*
+- **Text is selectable everywhere** (`selectable_labels`), and Ctrl+C copies to the real system clipboard — the platform mirrors egui copy commands through `navigator.clipboard` (egui's wasm clipboard is internal-only).
+- App windows are resizable (including panel splitters, e.g. the Notes sidebar); long content scrolls (Settings, Terminal, Files, Notes).
+
 ---
 
 ## 7. Accessibility
