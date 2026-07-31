@@ -57,7 +57,9 @@ thread_local! {
     static CAMERA_STATUS: RefCell<Option<(bool, String)>> = const { RefCell::new(None) };
     static CAMERA_PIXELS: RefCell<Option<(Vec<u8>, u32, u32)>> = const { RefCell::new(None) };
     static AI_CHUNKS: RefCell<Vec<(u32, String, bool)>> = const { RefCell::new(Vec::new()) };
-    static VOICE_STATUS: RefCell<Option<(bool, bool, String)>> = const { RefCell::new(None) };
+    // A queue, not a latest-wins cell: error + end statuses can land in the
+    // same frame, and the error reason must not be lost.
+    static VOICE_STATUS: RefCell<Vec<(bool, bool, String)>> = const { RefCell::new(Vec::new()) };
     static VOICE_TRANSCRIPTS: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
     static VFS_LOADED: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
     static VFS_DIRS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
@@ -148,7 +150,7 @@ pub fn pmos_ai_chunk(agent: u32, delta: String, done: bool) {
 /// Called by speech.js when the recognition engine starts, ends, or fails.
 #[wasm_bindgen]
 pub fn pmos_voice_status(listening: bool, available: bool, reason: String) {
-    VOICE_STATUS.with(|s| *s.borrow_mut() = Some((listening, available, reason)));
+    VOICE_STATUS.with(|s| s.borrow_mut().push((listening, available, reason)));
 }
 
 /// Called by speech.js with interim (live) and final transcript text.
@@ -370,7 +372,8 @@ impl OsApp {
         self.kernel.tick_hands(now);
 
         // Voice plumbing: engine status + transcripts in, capture intent out.
-        if let Some((listening, available, reason)) = VOICE_STATUS.with(|s| s.borrow_mut().take())
+        for (listening, available, reason) in
+            VOICE_STATUS.with(|s| std::mem::take(&mut *s.borrow_mut()))
         {
             self.kernel.voice_status(listening, available, reason);
         }

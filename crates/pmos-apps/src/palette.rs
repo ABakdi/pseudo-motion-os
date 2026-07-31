@@ -41,6 +41,9 @@ struct Voice {
     listening: bool,
     /// Latest interim transcript (superseded by the final utterance).
     interim: String,
+    /// Whether this session produced any transcript at all — a session that
+    /// ends without one must still say so, never end silently.
+    got_speech: bool,
 }
 
 pub struct Palette {
@@ -81,8 +84,10 @@ impl Palette {
     pub fn start_voice(&mut self) {
         self.open = true;
         self.focus_input = false;
-        self.voice.listening = true;
-        self.voice.interim.clear();
+        self.voice = Voice {
+            listening: true,
+            ..Voice::default()
+        };
         self.lines
             .push(Line::System("🎤 listening — speak a command…".into()));
     }
@@ -111,6 +116,11 @@ impl Palette {
                 self.input.clear();
                 return self.route(leftover, true);
             }
+            if !self.voice.got_speech && reason.is_empty() {
+                self.lines.push(Line::System(
+                    "🎤 didn't hear anything — hold 🤙 to try again".into(),
+                ));
+            }
         }
         Vec::new()
     }
@@ -118,6 +128,7 @@ impl Palette {
     /// Transcript from the kernel: interim text streams into the input line
     /// in real time; the final utterance replaces it and executes.
     pub fn on_voice_transcript(&mut self, text: String, is_final: bool) -> Vec<PaletteOutcome> {
+        self.voice.got_speech = true;
         if is_final {
             self.voice.interim.clear();
             self.input.clear();
