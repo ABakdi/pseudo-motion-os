@@ -135,9 +135,9 @@ impl HandTrackerState {
                 for h in 0..raw.1 as usize {
                     let lm = &raw.0[h * 63..(h + 1) * 63];
                     let color = if h == 0 {
-                        theme::ACCENT_A
+                        theme::accent_a()
                     } else {
-                        theme::ACCENT_B
+                        theme::accent_b()
                     };
                     // Mirror x to match the selfie-view preview.
                     let map = |i: usize| {
@@ -174,7 +174,7 @@ impl HandTrackerState {
                     let _ = kernel.syscall(pid, Syscall::CameraStart);
                 }
             } else if tracking {
-                ui.colored_label(theme::ACCENT_A, format!("● {}", pose_label));
+                ui.colored_label(theme::accent_a(), format!("● {}", pose_label));
                 ui.weak(format!(
                     "· {} hand{}",
                     raw.1,

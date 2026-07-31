@@ -84,7 +84,14 @@ impl AppKind {
             ],
             AppKind::RayTracer => vec![Capability::SysQuery],
             AppKind::HandTracker => vec![Capability::InputRawHands],
-            AppKind::Settings => vec![Capability::AiPrompt],
+            AppKind::Settings => vec![
+                Capability::AiPrompt,
+                // Appearance: pick the background (SysQuery gates the
+                // Background syscall) and persist choices under /settings.
+                Capability::SysQuery,
+                Capability::FsRead("/settings".into()),
+                Capability::FsWrite("/settings".into()),
+            ],
             AppKind::Browser => Vec::new(),
         }
     }
@@ -132,6 +139,10 @@ pub struct AppState {
     ai_base: String,
     ai_model: String,
     ai_key: String,
+    // appearance (Settings → Appearance, UI spec §6.1)
+    app_bg: u8,
+    app_scheme: u8,
+    appearance_loaded: bool,
     ai_status: String,
 }
 
@@ -159,6 +170,9 @@ impl AppState {
             ai_base: String::new(),
             ai_model: WEBLLM_MODELS[1].1.to_string(),
             ai_key: String::new(),
+            app_bg: 0,
+            app_scheme: 0,
+            appearance_loaded: false,
             ai_status: String::new(),
         }
     }
@@ -652,8 +666,8 @@ impl AppState {
         today: &str,
     ) {
         egui::Panel::left(egui::Id::new(("notes-list", pid.0)))
-            .resizable(false)
-            .exact_size(180.0)
+            .resizable(true)
+            .default_size(180.0)
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
@@ -916,7 +930,79 @@ impl AppState {
         });
         ui.add_space(10.0);
         ui.separator();
+        self.appearance_ui(ui, kernel, pid);
+        ui.add_space(10.0);
+        ui.separator();
         ui.weak("Gestures are tuned in the Hand Tracker app.");
         ui.weak("Stage camera: drag = orbit · wheel = zoom · Home = reset");
+    }
+
+    /// Settings → Appearance (UI spec §6.1): stage background + color scheme,
+    /// applied live and persisted to /settings/appearance.json via the VFS.
+    fn appearance_ui(&mut self, ui: &mut egui::Ui, kernel: &mut dyn KernelApi, pid: Pid) {
+        const BACKGROUNDS: &[&str] = &["Deep Space", "Ember Nebula", "Aurora", "Void"];
+        const PATH: &str = "/settings/appearance.json";
+
+        if !self.appearance_loaded {
+            self.appearance_loaded = true;
+            self.app_scheme = crate::theme::scheme();
+            if let Ok(pmos_abi::Reply::Bytes(b)) =
+                kernel.syscall(pid, Syscall::FsRead { path: PATH.into() })
+            {
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
+                    self.app_bg = v["background"].as_u64().unwrap_or(0) as u8;
+                    self.app_scheme = v["scheme"].as_u64().unwrap_or(0) as u8;
+                }
+            }
+        }
+
+        ui.heading("Appearance");
+        ui.add_space(4.0);
+        let mut changed = false;
+        egui::Grid::new("appearance")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label("Background");
+                ui.horizontal_wrapped(|ui| {
+                    for (i, name) in BACKGROUNDS.iter().enumerate() {
+                        changed |= ui
+                            .radio_value(&mut self.app_bg, i as u8, *name)
+                            .changed();
+                    }
+                });
+                ui.end_row();
+
+                ui.label("Colors");
+                ui.horizontal_wrapped(|ui| {
+                    for (i, (name, a, _)) in crate::theme::SCHEMES.iter().enumerate() {
+                        let r = ui.radio_value(&mut self.app_scheme, i as u8, *name);
+                        changed |= r.changed();
+                        // Swatch next to the label.
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(10.0, 10.0),
+                            egui::Sense::hover(),
+                        );
+                        ui.painter().circle_filled(rect.center(), 4.0, *a);
+                    }
+                });
+                ui.end_row();
+            });
+        if changed {
+            let _ = kernel.syscall(pid, Syscall::Background { style: self.app_bg });
+            crate::theme::set_scheme(ui.ctx(), self.app_scheme);
+            let json = serde_json::json!({
+                "background": self.app_bg,
+                "scheme": self.app_scheme,
+            })
+            .to_string();
+            let _ = kernel.syscall(
+                pid,
+                Syscall::FsWrite {
+                    path: PATH.into(),
+                    bytes: json.into_bytes(),
+                },
+            );
+        }
     }
 }

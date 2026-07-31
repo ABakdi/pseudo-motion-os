@@ -47,6 +47,9 @@ pub struct Shell {
     /// rect in points). The platform overlays the actual iframe there.
     pub browser_view: Option<(String, [f32; 4])>,
     themed: bool,
+    /// Boot-load of /settings/appearance.json (retried while OPFS loads).
+    appearance_done: bool,
+    appearance_tries: u32,
 }
 
 impl Shell {
@@ -81,6 +84,8 @@ impl Shell {
             toasts: Vec::new(),
             browser_view: None,
             themed: false,
+            appearance_done: false,
+            appearance_tries: 0,
         }
     }
 
@@ -281,6 +286,28 @@ impl Shell {
         if !self.themed {
             theme::apply(ctx);
             self.themed = true;
+        }
+        // Apply the persisted appearance once the async VFS boot delivers it
+        // (missing file after ~4 s of retries = fresh install, defaults stay).
+        if !self.appearance_done {
+            self.appearance_tries += 1;
+            match kernel.syscall(
+                self.pid,
+                Syscall::FsRead {
+                    path: "/settings/appearance.json".into(),
+                },
+            ) {
+                Ok(pmos_abi::Reply::Bytes(b)) => {
+                    self.appearance_done = true;
+                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
+                        let bg = v["background"].as_u64().unwrap_or(0) as u8;
+                        let _ = kernel.syscall(self.pid, Syscall::Background { style: bg });
+                        theme::set_scheme(ctx, v["scheme"].as_u64().unwrap_or(0) as u8);
+                    }
+                }
+                _ if self.appearance_tries > 240 => self.appearance_done = true,
+                _ => {}
+            }
         }
         let now = ctx.input(|i| i.time);
         let mut ai_outcomes: Vec<PaletteOutcome> = Vec::new();
@@ -650,7 +677,9 @@ impl Shell {
                     None
                 }
                 AppKind::Settings => {
-                    state.settings_ui(ui, kernel, pid);
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| state.settings_ui(ui, kernel, pid));
                     None
                 }
                 AppKind::Terminal => state.terminal_ui(ui, kernel, pid),
@@ -729,7 +758,7 @@ impl Shell {
                                 }
                                 if open {
                                     let below = btn.rect.center_bottom() + egui::vec2(0.0, 3.0);
-                                    ui.painter().circle_filled(below, 2.0, theme::ACCENT_A);
+                                    ui.painter().circle_filled(below, 2.0, theme::accent_a());
                                 }
                             }
                         });

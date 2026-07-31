@@ -67,7 +67,7 @@ impl HandCursor {
                     p.circle_stroke(
                         center,
                         10.0 + 42.0 * k,
-                        egui::Stroke::new(2.0 * (1.0 - k), theme::ACCENT_A.gamma_multiply(1.0 - k)),
+                        egui::Stroke::new(2.0 * (1.0 - k), theme::accent_a().gamma_multiply(1.0 - k)),
                     );
                 }
                 if !self.tracking {
@@ -83,19 +83,19 @@ impl HandCursor {
                 match self.pose {
                     HandPose::Pinch => {
                         // Closed: solid dot with a soft halo.
-                        p.circle_filled(center, 6.0, theme::ACCENT_A);
+                        p.circle_filled(center, 6.0, theme::accent_a());
                         p.circle_stroke(
                             center,
                             10.0,
-                            egui::Stroke::new(1.0, theme::ACCENT_A.gamma_multiply(0.35)),
+                            egui::Stroke::new(1.0, theme::accent_a().gamma_multiply(0.35)),
                         );
                     }
                     HandPose::MiddlePinch => {
-                        p.circle_filled(center, 6.0, theme::ACCENT_B);
+                        p.circle_filled(center, 6.0, theme::accent_b());
                         p.circle_stroke(
                             center,
                             10.0,
-                            egui::Stroke::new(1.0, theme::ACCENT_B.gamma_multiply(0.35)),
+                            egui::Stroke::new(1.0, theme::accent_b().gamma_multiply(0.35)),
                         );
                     }
                     HandPose::Grab => glyph(p, center, "✊", 26.0),
@@ -105,14 +105,14 @@ impl HandCursor {
                         p.circle_stroke(
                             center,
                             pulse,
-                            egui::Stroke::new(2.0, theme::ACCENT_A.gamma_multiply(0.5)),
+                            egui::Stroke::new(2.0, theme::accent_a().gamma_multiply(0.5)),
                         );
                         glyph(p, center, "✋", 24.0);
                     }
                     HandPose::CallSign => {
                         // Voice anchor: accent-B ring with a pulsing core.
                         let a = 0.5 + 0.5 * (t * 4.0).sin().abs();
-                        p.circle_stroke(center, 12.0, egui::Stroke::new(2.0, theme::ACCENT_B));
+                        p.circle_stroke(center, 12.0, egui::Stroke::new(2.0, theme::accent_b()));
                         p.circle_filled(
                             center,
                             4.0,
@@ -128,7 +128,7 @@ impl HandCursor {
                         p.circle_stroke(
                             center,
                             r,
-                            egui::Stroke::new(2.0, theme::ACCENT_A.gamma_multiply(0.85)),
+                            egui::Stroke::new(2.0, theme::accent_a().gamma_multiply(0.85)),
                         );
                         p.circle_filled(center, 2.2, theme::INK);
                     }

@@ -209,7 +209,7 @@ fn render_node(app: &mut AppInstance, node: &Node, ui: &mut egui::Ui, now_ms: f6
             let v = eval_num(app, node, "value", 0.0, now_ms).clamp(0.0, 1.0) as f32;
             ui.add(
                 egui::ProgressBar::new(v)
-                    .fill(theme::ACCENT_A.gamma_multiply(0.8))
+                    .fill(theme::accent_a().gamma_multiply(0.8))
                     .desired_width(ui.available_width().min(280.0)),
             );
         }

@@ -479,7 +479,7 @@ impl Palette {
                                 for line in &self.lines {
                                     match line {
                                         Line::User(t) => {
-                                            ui.colored_label(theme::ACCENT_A, format!("❯ {t}"));
+                                            ui.colored_label(theme::accent_a(), format!("❯ {t}"));
                                         }
                                         Line::Assistant(t) => {
                                             ui.label(if t.is_empty() { "…" } else { t.as_str() });
