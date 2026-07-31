@@ -18,7 +18,10 @@ pub struct LlmRequest {
     pub kind: u8,
 }
 
-#[derive(Default)]
+/// Default in-browser model (WebLLM "Balanced" tier, AI System spec §2):
+/// free, no key, downloaded once and cached — AI works out of the box.
+pub const WEBLLM_DEFAULT_MODEL: &str = "Llama-3.2-1B-Instruct-q4f16_1-MLC";
+
 pub struct AiState {
     pub config: Option<AiProviderConfig>,
     /// Set when the config changed and should be persisted by the platform.
@@ -28,6 +31,23 @@ pub struct AiState {
     /// agent id → (requesting process, accumulated reply so far).
     pub streams: HashMap<u32, (Pid, String)>,
     history: HashMap<u32, Vec<(String, String)>>,
+}
+
+impl Default for AiState {
+    fn default() -> Self {
+        Self {
+            config: Some(AiProviderConfig {
+                kind: 2,
+                base_url: String::new(),
+                model: WEBLLM_DEFAULT_MODEL.into(),
+                api_key: String::new(),
+            }),
+            config_dirty: false, // the default is not persisted until changed
+            pending: Vec::new(),
+            streams: HashMap::new(),
+            history: HashMap::new(),
+        }
+    }
 }
 
 impl AiState {
@@ -60,6 +80,24 @@ impl AiState {
         let system = system_prompt(agent);
 
         let req = match cfg.kind {
+            // In-browser WebLLM (ABI 1.6): no URL, no headers, no key — the
+            // platform runs inference locally via webllm.js.
+            2 => {
+                let mut messages = vec![serde_json::json!({"role": "system", "content": system})];
+                messages.extend(
+                    tail.iter().map(
+                        |(role, content)| serde_json::json!({"role": role, "content": content}),
+                    ),
+                );
+                LlmRequest {
+                    agent: agent.0,
+                    url: String::new(),
+                    headers: Vec::new(),
+                    body: serde_json::json!({"model": cfg.model, "messages": messages})
+                        .to_string(),
+                    kind: 2,
+                }
+            }
             0 => {
                 let url = if cfg.base_url.trim().is_empty() {
                     "https://api.anthropic.com/v1/messages".to_string()
@@ -130,9 +168,14 @@ impl AiState {
     }
 
     /// Platform delivered a streamed delta. Returns the requester to notify.
+    /// A `'\r'`-prefixed delta REPLACES the accumulation (ABI 1.6) — keeps
+    /// transient progress lines out of the saved conversation history.
     pub fn chunk(&mut self, agent: u32, delta: &str, done: bool) -> Option<Pid> {
         let (requester, acc) = self.streams.get_mut(&agent)?;
-        acc.push_str(delta);
+        match delta.strip_prefix('\r') {
+            Some(rest) => *acc = rest.to_string(),
+            None => acc.push_str(delta),
+        }
         let requester = *requester;
         if done {
             let (_, full) = self.streams.remove(&agent).unwrap();

@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 5);
+pub const ABI_VERSION: (u16, u16) = (1, 6);
 
 // ---------- handles ----------
 
@@ -185,7 +185,8 @@ impl Default for HandsTuning {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AiProviderConfig {
     /// 0 = Anthropic (direct browser), 1 = OpenAI-compatible (incl. local
-    /// servers like Ollama / LM Studio).
+    /// servers like Ollama / LM Studio), 2 = in-browser WebLLM (ABI 1.6):
+    /// free WebGPU inference, model downloaded once and cached, no key.
     pub kind: u8,
     /// Empty = provider default endpoint.
     pub base_url: String,
@@ -280,6 +281,9 @@ pub enum KernelEvent {
     FsChanged {
         path: String,
     },
+    /// A streamed LLM delta. A `text` starting with `'\r'` REPLACES the
+    /// text accumulated so far instead of appending (ABI 1.6) — used for
+    /// transient progress lines like in-browser model downloads.
     AiChunk {
         agent: AgentId,
         text: String,
