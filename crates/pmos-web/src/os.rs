@@ -304,6 +304,12 @@ struct OsApp {
     mouse_mode: GrabMode,
     last_cursor: Option<(f32, f32)>,
     last_press: f64,
+    /// Left button held — the mouse owns the egui pointer while true, so
+    /// hand-tracking Move events must not hijack drags or text selection.
+    mouse_left_down: bool,
+    /// Last hand cursor position forwarded to egui (sub-point jitter from a
+    /// resting hand would otherwise fight the mouse for the pointer).
+    last_hand_move: Option<[f32; 2]>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -341,6 +347,8 @@ impl OsApp {
             mouse_mode: GrabMode::None,
             last_cursor: None,
             last_press: 0.0,
+            mouse_left_down: false,
+            last_hand_move: None,
         }
     }
 
@@ -529,7 +537,19 @@ impl OsApp {
             let ev = &mut raw_input.events;
             let p = |xy: [f32; 2]| egui::pos2(xy[0], xy[1]);
             match intent {
-                HandIntent::Move(pos) => ev.push(egui::Event::PointerMoved(p(pos))),
+                HandIntent::Move(pos) => {
+                    // The mouse owns the pointer while its button is down
+                    // (drags, text selection); and a resting hand's sub-point
+                    // jitter must not spam pointer moves.
+                    let moved = self
+                        .last_hand_move
+                        .map(|l| (pos[0] - l[0]).abs() + (pos[1] - l[1]).abs() > 0.5)
+                        .unwrap_or(true);
+                    if !self.mouse_left_down && moved {
+                        self.last_hand_move = Some(pos);
+                        ev.push(egui::Event::PointerMoved(p(pos)));
+                    }
+                }
                 HandIntent::Press { pos, secondary } | HandIntent::Release { pos, secondary } => {
                     let pressed = matches!(intent, HandIntent::Press { .. });
                     ev.push(egui::Event::PointerMoved(p(pos)));
@@ -717,6 +737,7 @@ impl ApplicationHandler for OsApp {
                 button: MouseButton::Left,
                 ..
             } => {
+                self.mouse_left_down = state == ElementState::Pressed;
                 if state == ElementState::Pressed && !egui_wants {
                     let t = now_secs();
                     if t - self.last_press < 0.35 {
