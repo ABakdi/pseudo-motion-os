@@ -12,6 +12,14 @@ Entry format:
 
 ---
 
+## [2026-08-01] — WebLLM: fit the model to the machine; fix engine switching
+### Code
+- Fixed "PackedFunc has already been disposed" (user-reported when switching to the Quality tier): switching models created a second MLCEngine over the live one, corrupting the TVM runtime — there is now ONE engine, switched with `engine.reload()`, and a failed runtime is fully torn down before any retry.
+- Machine probe (user request): at boot `webllm.js` reads RAM (`navigator.deviceMemory`) and GPU headroom (`adapter.limits.maxBufferSize`) and reports the fitting tier to the kernel — surfaced as `/sys/llm_tier`; Settings marks that tier "★ fits this machine" and bigger ones "may not fit", and when the user never saved an AI config the default model is fitted to the tier automatically.
+- Runtime step-down ladder: a model that fails to load or infer falls back automatically — fp16→fp32, then tier by tier — with the progress line explaining each step ('\r'-reset keeps output clean); the error surfaces only when every candidate fails.
+### Specs
+- [[AI System]] §2 WebLLM row: machine-fit behavior noted.
+
 ## [2026-07-31] — Appearance: pickable backgrounds and color schemes; selectable, copyable text
 ### Code
 - Sky shader: four background presets behind one uniform (`style`) — Deep Space (default), Ember Nebula, Aurora, Void; new `Background{style}` syscall (ABI 1.7, `SysQuery`-gated) sets it live.
