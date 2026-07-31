@@ -12,6 +12,13 @@ Entry format:
 
 ---
 
+## [2026-08-01] — Stage control by gesture and voice
+### Code
+- Gestures: 👍 held 0.6 s drops a cube (deterministic scatter, palette colors, toast confirms); 👎 held removes the newest object — G9's v1 idle binding; dialogs will take precedence when consent sheets land. Grab/throw with ✊ already worked (modality parity).
+- Voice/typed fast path in the palette: "drop a cube", "spawn a ball", "clear the stage", "remove the last object" execute instantly through new palette outcomes — no LLM round-trip; anything richer still routes to the assistant's stage tools.
+### Specs
+- [[Hand Gestures]] G9 updated (0.6 s hold; stage binding + dialog precedence note); [[Todo]] entry.
+
 ## [2026-08-01] — Files redesign, working browser start page, and a controllable stage
 ### Code
 - **Files**: full redesign — places sidebar, grid/list views with per-type icons, selection + resizable preview panel (text preview, `.conjure` manifest ▶ Launch, delete), breadcrumbs with ⬆, new-file/new-folder footer; folders open on single click, apps on double click.
