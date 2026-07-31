@@ -12,6 +12,14 @@ Entry format:
 
 ---
 
+## [2026-08-01] — Files redesign, working browser start page, and a controllable stage
+### Code
+- **Files**: full redesign — places sidebar, grid/list views with per-type icons, selection + resizable preview panel (text preview, `.conjure` manifest ▶ Launch, delete), breadcrumbs with ⬆, new-file/new-folder footer; folders open on single click, apps on double click.
+- **Browser**: opens on Wikipedia instead of an empty frame (an X-Frame-Options refusal is a blank page and undetectable cross-origin — starting on a known-embeddable page proves the app works); quick links to embeddable sites.
+- **Stage (ABI 1.8)**: `StageSpawn`/`StageRemove`/`StageClear`/`StageImpulse`/`StageList` (PhysSpawn-gated, physics-backed — objects fall, collide, grab, throw) and `StageLight` (sun direction/intensity/ambient, packed into the existing 96-byte props uniform); Settings → Stage panel with drop-cube/drop-sphere/clear and sun sliders; assistant gains the six stage tools with an 8-call budget — "build me a tower", "make it sunset", "throw the red cube" all work through capability-checked syscalls.
+### Specs
+- [[AI System]] §3.1: stage tools + raised budget. [[Todo]]: three entries under post-release.
+
 ## [2026-08-01] — Clean stage, real typography, and text selection that works
 ### Code
 - Demo props removed (decision logged): the stage boots empty; `spawn_prop`, grab/throw and the physics pipeline remain for future content. Physics tests spawn their own fixtures.
