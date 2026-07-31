@@ -12,6 +12,12 @@ Entry format:
 
 ---
 
+## [2026-07-31] — Voice: surface engine failures instead of ending silently
+### Code
+- Fixed a status race that could swallow the speech engine's error reason: `onerror` + `onend` land in the same frame, and the latest-wins status cell let the clean-end overwrite the error — the platform bridge now queues statuses, and `speech.js` suppresses the generic end after an error.
+- `speech.js`: `[pmos-voice]` console diagnostics on every engine event; the `network` error message now names the real-world cause (non-branded Chromium builds ship without Google's speech keys — use Chrome/Edge).
+- Palette: a session that ends with no transcript and no error says "🎤 didn't hear anything" — voice never ends silently.
+
 ## [2026-07-31] — Voice command palette: 🤙 hold, live transcript, free Web Speech engine
 ### Code
 - ABI 1.5: `VoiceCapture{start}` syscall, `VoiceStatus`/`VoiceTranscript` events, `voice:input` capability (granted to the shell).
