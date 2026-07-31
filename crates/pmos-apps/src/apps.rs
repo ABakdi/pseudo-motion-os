@@ -143,6 +143,8 @@ pub struct AppState {
     app_bg: u8,
     app_scheme: u8,
     appearance_loaded: bool,
+    /// Machine-probed in-browser LLM tier (/sys/llm_tier); None = not read.
+    llm_tier: Option<u8>,
     ai_status: String,
 }
 
@@ -173,6 +175,7 @@ impl AppState {
             app_bg: 0,
             app_scheme: 0,
             appearance_loaded: false,
+            llm_tier: None,
             ai_status: String::new(),
         }
     }
@@ -860,13 +863,35 @@ impl AppState {
 
                 if self.ai_kind == 2 {
                     // Performance tiers instead of free-form model/key fields.
+                    // The platform probes RAM + GPU headroom at boot and the
+                    // fitting tier is marked (user request: match the machine).
+                    let tier = *self.llm_tier.get_or_insert_with(|| {
+                        match kernel.syscall(
+                            pid,
+                            Syscall::SysQuery {
+                                path: "/sys/llm_tier".into(),
+                            },
+                        ) {
+                            Ok(pmos_abi::Reply::Bytes(b)) => {
+                                String::from_utf8_lossy(&b).trim().parse().unwrap_or(1)
+                            }
+                            _ => 1,
+                        }
+                    });
                     if !WEBLLM_MODELS.iter().any(|(_, id)| *id == self.ai_model) {
-                        self.ai_model = WEBLLM_MODELS[1].1.to_string();
+                        self.ai_model = WEBLLM_MODELS[tier as usize].1.to_string();
                     }
                     ui.label("Performance");
                     ui.vertical(|ui| {
-                        for (label, id) in WEBLLM_MODELS {
-                            ui.radio_value(&mut self.ai_model, id.to_string(), *label);
+                        for (i, (label, id)) in WEBLLM_MODELS.iter().enumerate() {
+                            let text = if i as u8 == tier {
+                                format!("{label} · ★ fits this machine")
+                            } else if i as u8 > tier {
+                                format!("{label} · may not fit")
+                            } else {
+                                label.to_string()
+                            };
+                            ui.radio_value(&mut self.ai_model, id.to_string(), text);
                         }
                     });
                     ui.end_row();

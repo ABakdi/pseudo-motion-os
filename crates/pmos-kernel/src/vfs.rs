@@ -25,6 +25,9 @@ pub struct Vfs {
     pub ready: bool,
     /// Live system stats surfaced under /sys.
     pub sys_fps: f32,
+    /// In-browser LLM tier this machine can handle (0 Fast · 1 Balanced ·
+    /// 2 Quality), probed by the platform at boot from RAM + GPU limits.
+    pub sys_llm_tier: u8,
 }
 
 fn normalize(path: &str) -> String {
@@ -59,6 +62,7 @@ impl Vfs {
             dirty: Vec::new(),
             ready: false,
             sys_fps: 0.0,
+            sys_llm_tier: 1,
         };
         for d in [
             "/",
@@ -105,6 +109,7 @@ impl Vfs {
         match path {
             "/sys/fps" => Some(format!("{:.1}\n", self.sys_fps).into_bytes()),
             "/sys/abi" => Some(format!("{:?}\n", pmos_abi::ABI_VERSION).into_bytes()),
+            "/sys/llm_tier" => Some(format!("{}\n", self.sys_llm_tier).into_bytes()),
             _ => None,
         }
     }
@@ -167,7 +172,7 @@ impl Vfs {
         let path = normalize(path);
         if path == "/sys" {
             return Some(
-                ["fps", "abi"]
+                ["fps", "abi", "llm_tier"]
                     .iter()
                     .map(|n| DirEntry {
                         name: n.to_string(),
