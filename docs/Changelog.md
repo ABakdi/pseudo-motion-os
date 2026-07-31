@@ -12,6 +12,14 @@ Entry format:
 
 ---
 
+## [2026-08-01] — Clean stage, real typography, and text selection that works
+### Code
+- Demo props removed (decision logged): the stage boots empty; `spawn_prop`, grab/throw and the physics pipeline remain for future content. Physics tests spawn their own fixtures.
+- Typography: **Inter** (with an Inter Medium heading cut) and **JetBrains Mono** embedded as the UI typefaces (egui built-ins remain fallbacks for emoji/symbols); full text-style scale, wider item spacing/margins/button padding, 8px widget rounding, soft window/popup shadows, quiet raised widget fills with hairline strokes — accent color appears only on interaction.
+- **Text selection fixed** (user-reported): while a hand was tracked, the fusion layer pushed a synthetic `PointerMoved` every frame, yanking the egui pointer away from the mouse mid-drag — selection was impossible with the camera on. Hand Move events are now suppressed while the left mouse button is down (the mouse owns the pointer during drags/selection) and deduplicated below 0.5 pt so a resting hand's jitter no longer floods the pointer stream.
+### Specs
+- [[Todo]] M7: props removal annotated; Decisions Log entry added.
+
 ## [2026-08-01] — WebLLM: fit the model to the machine; fix engine switching
 ### Code
 - Fixed "PackedFunc has already been disposed" (user-reported when switching to the Quality tier): switching models created a second MLCEngine over the live one, corrupting the TVM runtime — there is now ONE engine, switched with `engine.reload()`, and a failed runtime is fully torn down before any retry.
@@ -263,6 +271,7 @@ Entry format:
 
 | Date | Decision | Rationale |
 |------|----------|-----------|
+| 2026-08-01 | Stage boots clean — no scattered demo props | Clunky first impression; physics/grab stays for notes-as-bodies & conjured objects |
 | 2026-07-29 | Custom wgpu layer, no Bevy | Full render-graph control (RT compute pass + egui-to-texture); small binary |
 | 2026-07-29 | AI apps = interpreted declarative format ("Conjure") | No in-browser rustc; host-enforced sandbox; reliable LLM output; evolvable |
 | 2026-07-29 | LLM: remote API first, WebLLM later, one provider abstraction | App generation needs frontier quality; local = backend swap later |
