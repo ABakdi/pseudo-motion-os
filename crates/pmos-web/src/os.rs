@@ -60,6 +60,7 @@ thread_local! {
     // A queue, not a latest-wins cell: error + end statuses can land in the
     // same frame, and the error reason must not be lost.
     static VOICE_STATUS: RefCell<Vec<(bool, bool, String)>> = const { RefCell::new(Vec::new()) };
+    static LLM_TIER: RefCell<Option<u8>> = const { RefCell::new(None) };
     static VOICE_TRANSCRIPTS: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
     static VFS_LOADED: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
     static VFS_DIRS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
@@ -157,6 +158,13 @@ pub fn pmos_voice_status(listening: bool, available: bool, reason: String) {
 #[wasm_bindgen]
 pub fn pmos_voice_transcript(text: String, is_final: bool) {
     VOICE_TRANSCRIPTS.with(|q| q.borrow_mut().push((text, is_final)));
+}
+
+/// Called by webllm.js after probing RAM + GPU limits: the in-browser LLM
+/// tier this machine can handle (0 Fast · 1 Balanced · 2 Quality).
+#[wasm_bindgen]
+pub fn pmos_llm_tier(tier: u8) {
+    LLM_TIER.with(|t| *t.borrow_mut() = Some(tier.min(2)));
 }
 
 /// Preview pixels for the Hand Tracker viewer (RGBA, mirrored). These go
@@ -404,6 +412,27 @@ impl OsApp {
         if self.kernel.voice_directives.generation != self.applied_voice_generation {
             self.applied_voice_generation = self.kernel.voice_directives.generation;
             apply_voice_directive(self.kernel.voice_directives.capture);
+        }
+        // Machine-probed LLM tier: surface via /sys/llm_tier, and — when the
+        // user never saved an AI config — fit the default model to the tier.
+        if let Some(tier) = LLM_TIER.with(|t| t.borrow_mut().take()) {
+            self.kernel.vfs.sys_llm_tier = tier;
+            let user_saved = local_storage()
+                .and_then(|s| s.get_item(AI_CFG_KEY).ok().flatten())
+                .is_some();
+            if !user_saved {
+                if let Some(cfg) = &mut self.kernel.ai.config {
+                    if cfg.kind == 2 {
+                        const TIER_MODELS: [&str; 3] = [
+                            "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
+                            "Llama-3.2-1B-Instruct-q4f16_1-MLC",
+                            "Qwen2.5-3B-Instruct-q4f16_1-MLC",
+                        ];
+                        cfg.model = TIER_MODELS[tier as usize].to_string();
+                        log::info!("default in-browser model fit to tier {tier}: {}", cfg.model);
+                    }
+                }
+            }
         }
 
         // VFS plumbing: ingest boot-loaded state, then mirror dirty ops out.
