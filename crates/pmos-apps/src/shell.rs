@@ -202,6 +202,85 @@ impl Shell {
                     Err(e) => (false, format!("{e:?}")),
                 }
             }
+            "stage_spawn" => {
+                let f = |k: &str, d: f32| {
+                    call.args.get(k).and_then(|v| v.as_f64()).unwrap_or(d as f64) as f32
+                };
+                let shape = match call.args.get("shape").and_then(|v| v.as_str()) {
+                    Some("sphere") => 1u8,
+                    _ => 0u8,
+                };
+                let color = call
+                    .args
+                    .get("color")
+                    .and_then(|v| v.as_str())
+                    .and_then(parse_hex_color)
+                    .unwrap_or([0.6, 0.8, 1.0]);
+                match kernel.syscall(
+                    self.pid,
+                    Syscall::StageSpawn {
+                        shape,
+                        pos: [f("x", 0.0), f("y", 3.0), f("z", 0.0)],
+                        half: f("size", 0.45),
+                        color,
+                    },
+                ) {
+                    Ok(Reply::Bytes(b)) => {
+                        (true, format!("spawned index {}", String::from_utf8_lossy(&b)))
+                    }
+                    Ok(_) => (true, "spawned".into()),
+                    Err(e) => (false, format!("{e:?}")),
+                }
+            }
+            "stage_list" => match kernel.syscall(self.pid, Syscall::StageList) {
+                Ok(Reply::Bytes(b)) => (true, String::from_utf8_lossy(&b).into_owned()),
+                Ok(_) => (true, "[]".into()),
+                Err(e) => (false, format!("{e:?}")),
+            },
+            "stage_remove" => {
+                let index = call.args.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                match kernel.syscall(self.pid, Syscall::StageRemove { index }) {
+                    Ok(_) => (true, "removed".into()),
+                    Err(e) => (false, format!("{e:?}")),
+                }
+            }
+            "stage_clear" => match kernel.syscall(self.pid, Syscall::StageClear) {
+                Ok(_) => (true, "cleared".into()),
+                Err(e) => (false, format!("{e:?}")),
+            },
+            "stage_push" => {
+                let f = |k: &str| {
+                    call.args.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32
+                };
+                let index = call.args.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                match kernel.syscall(
+                    self.pid,
+                    Syscall::StageImpulse {
+                        index,
+                        impulse: [f("x"), f("y"), f("z")],
+                    },
+                ) {
+                    Ok(_) => (true, "pushed".into()),
+                    Err(e) => (false, format!("{e:?}")),
+                }
+            }
+            "stage_light" => {
+                let f = |k: &str, d: f32| {
+                    call.args.get(k).and_then(|v| v.as_f64()).unwrap_or(d as f64) as f32
+                };
+                let (az, el) = (f("azimuth", 215.0).to_radians(), f("elevation", 60.0).to_radians());
+                match kernel.syscall(
+                    self.pid,
+                    Syscall::StageLight {
+                        dir: [el.cos() * az.cos(), -el.sin(), el.cos() * az.sin()],
+                        intensity: f("intensity", 1.0),
+                        ambient: f("ambient", 0.22),
+                    },
+                ) {
+                    Ok(_) => (true, "lighting set".into()),
+                    Err(e) => (false, format!("{e:?}")),
+                }
+            }
             "app_open" => {
                 let name = arg("name").to_lowercase();
                 if !name.is_empty() {
@@ -782,4 +861,18 @@ impl Shell {
                 });
             });
     }
+}
+
+/// Parse "#rrggbb" (hash optional) into linear-ish RGB floats.
+fn parse_hex_color(s: &str) -> Option<[f32; 3]> {
+    let s = s.trim_start_matches('#');
+    if s.len() != 6 {
+        return None;
+    }
+    let v = u32::from_str_radix(s, 16).ok()?;
+    Some([
+        ((v >> 16) & 0xff) as f32 / 255.0,
+        ((v >> 8) & 0xff) as f32 / 255.0,
+        (v & 0xff) as f32 / 255.0,
+    ])
 }

@@ -7,8 +7,9 @@ use crate::theme;
 use pmos_abi::{AgentId, AGENT_APP_SMITH, AGENT_ASSISTANT};
 
 const MAX_REPAIR_ROUNDS: u8 = 2;
-/// Tool-call budget per user request (AI System spec §3).
-const MAX_TOOL_ROUNDS: u8 = 4;
+/// Tool-call budget per user request (AI System spec §3; raised to 8 so the
+/// assistant can compose stage "models" from several spawns).
+const MAX_TOOL_ROUNDS: u8 = 8;
 
 /// A parsed `@@tool` invocation from an assistant reply (AI System spec §3).
 #[derive(Debug, Clone)]
@@ -242,7 +243,7 @@ impl Palette {
                     }
                     if self.tool_rounds >= MAX_TOOL_ROUNDS {
                         self.lines.push(Line::System(
-                            "⚠ tool budget exhausted (4 calls per request)".into(),
+                            "⚠ tool budget exhausted (8 calls per request)".into(),
                         ));
                     } else {
                         self.tool_rounds += 1;
