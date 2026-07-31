@@ -12,6 +12,13 @@ Entry format:
 
 ---
 
+## [2026-07-31] — Cursor stabilization: no more jumping on pinch/fist
+### Specs
+- [[Hand Gestures]] §2.1 (new): the researched stabilization design — one articulation-invariant anchor (palm centroid: wrist + MCP knuckles; fingertip anchors rejected on principle since every gesture *is* finger motion), a commit lock with a 12 pt soft radial deadband that engages the instant a pinch starts forming, and ~80 ms release easing; sources cited (MediaPipe palm-stability rationale, Ultraleap TouchFree interaction settings and pinch hysteresis).
+- [[Todo]]: new *Post-release — Field-testing stabilization* section; cursor stabilization ticked (user live verification pending).
+### Code
+- `pmos-kernel/input/hands.rs`: removed the pose-dependent anchor switch (the root cause of the user-reported cursor teleport when pinching/grabbing); cursor now always tracks the palm centroid; new `stabilize()` — hold origin latched from the previous cursor position (seamless entry), sub-deadzone motion fully suppressed, radial-excess follow beyond it (no snap at the boundary), exponential release easing; hold state cleared on tracking loss. 4 new tests → 17 kernel-native tests total.
+
 ## [2026-07-31] — Milestone 8: browser app, desktop scaffold, CI and release
 ### Code
 - Browser app: egui chrome + a sandboxed DOM iframe overlaid by the platform on the window's content rect (position synced every frame); embed-refusal caveat surfaced in the UI. Known z-order limitation documented (iframe stacks above the canvas).

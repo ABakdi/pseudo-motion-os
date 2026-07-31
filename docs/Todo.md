@@ -102,6 +102,11 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 - [x] **Demo golden path** — [[Demo]]: the scripted five-minute showcase with speaker lines and fallbacks.
 - [x] **Deploy** — GitHub Actions CI: tests + wasm check on every push; release build deployed to GitHub Pages from master (`--public-url /pseudo-motion-os/`). *(One-time repo setting needed: Pages → Source → GitHub Actions.)*
 
+## Post-release — Field-testing stabilization
+*Bugs and tuning found by using the OS for real, after the roadmap's core shipped.*
+
+- [x] **Cursor stabilization** — fixed the cursor teleporting on pinch/fist: the anchor used to switch landmarks per pose (index tip ↔ palm), so gesturing moved the cursor at the exact moment of commit. Researched and specced the proper approach ([[Hand Gestures#2.1 Cursor stabilization|spec §2.1]]): one articulation-invariant anchor (palm centroid — wrist + MCP knuckles, the same stability MediaPipe's palm detector relies on), a commit lock with a 12 pt soft deadband engaging the instant the pinch starts forming (Ultraleap TouchFree's pattern), and ~80 ms release easing so letting go never jumps either. 4 native tests (pose-switch invariance, sub-deadzone freeze, drag follow-through, release easing). *(Pending user verification live.)*
+
 ---
 
 *When a task completes: tick it here, log it in [[Changelog]], commit incrementally.*
