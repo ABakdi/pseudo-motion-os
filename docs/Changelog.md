@@ -12,6 +12,15 @@ Entry format:
 
 ---
 
+## [2026-07-31] — Voice works in any browser: Whisper in-browser becomes the default engine
+### Code
+- `pmos-web/whisper-worker.js` (new): `whisper-tiny` via transformers.js — WebGPU with WASM fallback, multilingual model auto-picked from `navigator.language`, ~40 MB model downloaded once and cached, transcription fully on-device. Motivation: Web Speech needs a Google/Apple backend that Brave and distro Chromium don't ship (user-reported).
+- `pmos-web/speech.js` rewritten as an engine manager: AudioWorklet mic capture, energy-based endpointing (1.1 s silence ends the utterance; 6 s no-speech / 15 s max guards), interim transcription every 1.5 s for live text, final pass at utterance end; speaking may begin while the model still downloads (audio buffers, progress streams to the palette); Esc discards in-flight results so a cancelled command can't execute late; Web Speech kept as init-failure fallback.
+- Platform: transcripts drain before statuses (final text must precede session-end); palette shows engine notes while listening (model download %, "transcribing…"). Kernel/ABI untouched — the engine swap happened entirely behind the platform boundary, as designed.
+### Specs
+- [[AI System]] §5: Whisper promoted from v2 to default engine; Web Speech demoted to fallback; deferred: model-size toggle in Settings.
+- [[Todo]]: voice palette entry updated to the any-browser engine.
+
 ## [2026-07-31] — Voice: surface engine failures instead of ending silently
 ### Code
 - Fixed a status race that could swallow the speech engine's error reason: `onerror` + `onend` land in the same frame, and the latest-wins status cell let the clean-end overwrite the error — the platform bridge now queues statuses, and `speech.js` suppresses the generic end after an error.

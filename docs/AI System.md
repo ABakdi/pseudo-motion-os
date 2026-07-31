@@ -102,11 +102,12 @@ mic (getUserMedia / Web Speech API)
   → G8-hold path bypasses routing entirely → raw transcript → notes inbox ([[Notes System#5. Voice capture]])
 ```
 
-- v1 STT: **Web Speech API** — pragmatic, zero-download, **free** (no API key); effectively Chrome-only and cloud-processed (documented limitation). *Implemented 2026-07-31:* `speech.js` runs one utterance per 🤙-hold (`continuous=false`, `interimResults=true`); the kernel drives it via the `VoiceCapture` syscall / `VoiceStatus`+`VoiceTranscript` events (ABI 1.5, `voice:input` capability). **Only text crosses into the kernel — audio never does**, the mirror of the camera landmarks-only boundary.
+- **Default STT: Whisper in-browser** *(implemented 2026-07-31 — promoted from v2 to default the same day: Web Speech turned out to require a Google/Apple speech backend that non-branded Chromium builds — Brave, distro Chromium — don't ship)*. `whisper-worker.js` runs `whisper-tiny` via transformers.js (WebGPU, WASM fallback; multilingual model auto-picked for non-English `navigator.language`): **works in any browser, fully offline after a one-time ~40 MB cached model download, audio never leaves the machine**. `speech.js` captures the mic through an AudioWorklet, does energy-based endpointing (utterance ends after ~1.1 s of silence; 6 s no-speech and 15 s max-utterance guards), live-transcribes the buffer every ~1.5 s for interim text, and runs a final pass at utterance end. You can start speaking while the model still downloads — audio buffers and the palette shows progress.
+- **Fallback STT: Web Speech API** — only when the Whisper worker cannot initialize (e.g. CDN unreachable on the very first run, before the model is cached); zero-download but needs a browser speech backend.
+- Kernel interface (engine-agnostic — swapping engines touched zero kernel code): `VoiceCapture` syscall / `VoiceStatus`+`VoiceTranscript` events (ABI 1.5, `voice:input` capability), one utterance per 🤙-hold. **Only text crosses into the kernel — audio never does**, the mirror of the camera landmarks-only boundary.
 - Routing (implemented): transcripts run through the *same* palette brain as typed input — app names (with spoken "open/launch/start the …" verbs stripped) launch apps, `make/create/build …` conjures via the App Smith, and anything unrecognized goes to the System Assistant, because spoken input is conversational (typed input keeps the explicit `>` prefix and the "unknown command" hint).
-- v2 STT: **Whisper in-browser** (transformers.js / WebGPU worker) behind the same `SpeechIn` trait — private and cross-browser, at the cost of a model download.
 - TTS (optional, off by default): Web Speech synthesis for assistant replies in presentation mode.
-- Still deferred: the G8-hold **voice note** path into the notes inbox.
+- Still deferred: the G8-hold **voice note** path into the notes inbox; a Settings toggle for model size (`tiny` → `base`/`small` for better accuracy at a bigger download).
 
 ---
 
