@@ -5,6 +5,10 @@
 (() => {
   async function request(agent, url, headersJson, body, kind) {
     const chunk = (delta, done) => window.wasmBindings.pmos_ai_chunk(agent, delta, done);
+    if (kind === 2) {
+      // In-browser inference — no fetch at all (webllm.js).
+      return window.pmosWebLlm.request(agent, body);
+    }
     let headers;
     try {
       headers = JSON.parse(headersJson);
