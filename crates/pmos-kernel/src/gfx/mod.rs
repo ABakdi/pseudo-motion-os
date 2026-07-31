@@ -33,6 +33,10 @@ pub struct Gfx {
     pub rt_animate: bool,
     /// Sky background preset (Background syscall, ABI 1.7 — UI spec §6.1).
     pub sky_style: u8,
+    /// Stage lighting (StageLight syscall, ABI 1.8).
+    pub light_dir: [f32; 3],
+    pub light_intensity: f32,
+    pub light_ambient: f32,
 }
 
 struct PassBits {
@@ -607,6 +611,9 @@ impl Gfx {
             rt_bounces: 3,
             rt_animate: true,
             sky_style: 0,
+            light_dir: [-0.4, -1.0, -0.3],
+            light_intensity: 1.0,
+            light_ambient: 0.22,
         }
     }
 
@@ -698,8 +705,13 @@ impl Gfx {
             let eye = self.camera.eye();
             let mut data = [0u8; 96];
             data[..64].copy_from_slice(cast_f32(&vp));
-            data[64..80].copy_from_slice(cast_f32(&[eye.x, eye.y, eye.z, 1.0]));
-            data[80..96].copy_from_slice(cast_f32(&[-0.4, -1.0, -0.3, 0.0]));
+            data[64..80].copy_from_slice(cast_f32(&[eye.x, eye.y, eye.z, self.light_ambient]));
+            data[80..96].copy_from_slice(cast_f32(&[
+                self.light_dir[0],
+                self.light_dir[1],
+                self.light_dir[2],
+                self.light_intensity,
+            ]));
             self.queue.write_buffer(&self.props.uniforms, 0, &data);
         }
 

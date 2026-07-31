@@ -1,5 +1,7 @@
 // Stage props: instanced cubes/spheres driven by the physics engine.
 
+// camera_pos.w carries the ambient floor, light_dir.w the sun intensity
+// (StageLight syscall, ABI 1.8) — packed to keep the 96-byte layout.
 struct SceneUniforms {
     view_proj: mat4x4<f32>,
     camera_pos: vec4<f32>,
@@ -45,11 +47,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let l = normalize(-u.light_dir.xyz);
     let v = normalize(u.camera_pos.xyz - in.world_pos);
-    let diff = max(dot(n, l), 0.0);
+    let intensity = u.light_dir.w;
+    let ambient = u.camera_pos.w;
+    let diff = max(dot(n, l), 0.0) * intensity;
     let h = normalize(l + v);
-    let spec = pow(max(dot(n, h), 0.0), 48.0) * 0.5;
+    let spec = pow(max(dot(n, h), 0.0), 48.0) * 0.5 * intensity;
     let rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.25;
-    let ambient = 0.22;
     let col = in.color * (ambient + diff * 0.85) + vec3<f32>(spec) + in.color * rim;
     return vec4<f32>(col, 1.0);
 }

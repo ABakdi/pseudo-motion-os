@@ -449,6 +449,78 @@ impl KernelApi for Kernel {
                 }
                 Ok(Reply::None)
             }
+            Syscall::StageSpawn {
+                shape,
+                pos,
+                half,
+                color,
+            } => {
+                self.require(caller, &Capability::PhysSpawn)?;
+                self.phys.spawn_prop(
+                    glam::Vec3::from(pos),
+                    shape.min(1),
+                    half.clamp(0.1, 2.0),
+                    color,
+                );
+                let index = self.phys.props.len() - 1;
+                Ok(Reply::Bytes(index.to_string().into_bytes()))
+            }
+            Syscall::StageRemove { index } => {
+                self.require(caller, &Capability::PhysSpawn)?;
+                if self.phys.remove_prop(index as usize) {
+                    Ok(Reply::None)
+                } else {
+                    Err(ErrorCode::NotFound)
+                }
+            }
+            Syscall::StageClear => {
+                self.require(caller, &Capability::PhysSpawn)?;
+                self.phys.clear_props();
+                Ok(Reply::None)
+            }
+            Syscall::StageImpulse { index, impulse } => {
+                self.require(caller, &Capability::PhysSpawn)?;
+                if self.phys.impulse_prop(index as usize, glam::Vec3::from(impulse)) {
+                    Ok(Reply::None)
+                } else {
+                    Err(ErrorCode::NotFound)
+                }
+            }
+            Syscall::StageList => {
+                self.require(caller, &Capability::PhysSpawn)?;
+                let list: Vec<serde_json::Value> = self
+                    .phys
+                    .instances()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (pos, _, shape, half, color))| {
+                        serde_json::json!({
+                            "index": i,
+                            "shape": if *shape == 0 { "cube" } else { "sphere" },
+                            "size": half,
+                            "color": color,
+                            "pos": pos,
+                        })
+                    })
+                    .collect();
+                Ok(Reply::Bytes(
+                    serde_json::to_string(&list).unwrap_or_default().into_bytes(),
+                ))
+            }
+            Syscall::StageLight {
+                dir,
+                intensity,
+                ambient,
+            } => {
+                self.require(caller, &Capability::SysQuery)?;
+                if let Some(gfx) = self.gfx.as_mut() {
+                    let d = glam::Vec3::from(dir).normalize_or(glam::Vec3::new(-0.4, -1.0, -0.3));
+                    gfx.light_dir = d.into();
+                    gfx.light_intensity = intensity.clamp(0.0, 2.5);
+                    gfx.light_ambient = ambient.clamp(0.0, 1.0);
+                }
+                Ok(Reply::None)
+            }
             Syscall::VoiceCapture { start } => {
                 self.require(caller, &Capability::VoiceInput)?;
                 if self.voice_directives.capture != start {

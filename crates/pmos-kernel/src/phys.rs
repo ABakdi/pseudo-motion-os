@@ -168,6 +168,46 @@ impl Physics {
     }
 
     /// Release the grab; current velocity carries — that's the throw.
+    /// Remove one spawned prop (stage syscalls, ABI 1.8).
+    pub fn remove_prop(&mut self, index: usize) -> bool {
+        if index >= self.props.len() {
+            return false;
+        }
+        let prop = self.props.remove(index);
+        if self.grabbed.map(|(h, _)| h) == Some(prop.body) {
+            self.grabbed = None;
+        }
+        self.bodies.remove(
+            prop.body,
+            &mut self.islands,
+            &mut self.colliders,
+            &mut self.impulse_joints,
+            &mut self.multibody_joints,
+            true,
+        );
+        true
+    }
+
+    pub fn clear_props(&mut self) {
+        while !self.props.is_empty() {
+            self.remove_prop(0);
+        }
+    }
+
+    /// Push a prop (stage syscalls, ABI 1.8) — physics does the animating.
+    pub fn impulse_prop(&mut self, index: usize, imp: Vec3) -> bool {
+        let Some(prop) = self.props.get(index) else {
+            return false;
+        };
+        match self.bodies.get_mut(prop.body) {
+            Some(body) => {
+                body.apply_impulse(vector![imp.x, imp.y, imp.z], true);
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn release(&mut self) {
         if let Some((handle, _)) = self.grabbed.take() {
             if let Some(body) = self.bodies.get_mut(handle) {

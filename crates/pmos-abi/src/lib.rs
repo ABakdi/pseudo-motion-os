@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 7);
+pub const ABI_VERSION: (u16, u16) = (1, 8);
 
 // ---------- handles ----------
 
@@ -156,6 +156,38 @@ pub enum Syscall {
     /// 0 Deep Space · 1 Ember Nebula · 2 Aurora · 3 Void. Requires `SysQuery`.
     Background {
         style: u8,
+    },
+    // Stage objects & lighting (ABI 1.8). All object calls require
+    // `PhysSpawn`; lighting requires `SysQuery`. Objects are physics bodies —
+    // they fall, collide, and can be grabbed/thrown like anything else.
+    /// Spawn a primitive (`shape`: 0 cube · 1 sphere) at `pos` with
+    /// half-extent `half` and an RGB `color`. Replies `Bytes(index)`.
+    StageSpawn {
+        shape: u8,
+        pos: [f32; 3],
+        half: f32,
+        color: [f32; 3],
+    },
+    /// Remove the object at `index` (as reported by `StageList`).
+    StageRemove {
+        index: u32,
+    },
+    /// Remove every spawned object.
+    StageClear,
+    /// Apply a physics impulse to the object at `index` (push/throw).
+    StageImpulse {
+        index: u32,
+        impulse: [f32; 3],
+    },
+    /// List spawned objects. Replies `Bytes(JSON)`:
+    /// `[{"index","shape","size","color","pos"}...]`.
+    StageList,
+    /// Set stage lighting: sun direction (normalized by the kernel),
+    /// intensity (0..2) and ambient floor (0..1).
+    StageLight {
+        dir: [f32; 3],
+        intensity: f32,
+        ambient: f32,
     },
 }
 
