@@ -209,6 +209,25 @@ fn sync_browser_iframe(view: &Option<(String, [f32; 4])>) {
     }
 }
 
+/// Write text to the system clipboard via navigator.clipboard (async,
+/// fire-and-forget — a rejection just means the browser withheld permission).
+fn copy_to_clipboard(text: &str) {
+    let Some(win) = web_sys::window() else { return };
+    let nav: JsValue = win.navigator().into();
+    let Ok(clip) = js_sys::Reflect::get(&nav, &JsValue::from_str("clipboard")) else {
+        return;
+    };
+    if clip.is_undefined() {
+        return;
+    }
+    let Ok(f) = js_sys::Reflect::get(&clip, &JsValue::from_str("writeText")) else {
+        return;
+    };
+    if let Some(f) = f.dyn_ref::<js_sys::Function>() {
+        let _ = f.call1(&clip, &JsValue::from_str(text));
+    }
+}
+
 /// Apply the kernel voice directive to speech.js (start/stop capture).
 fn apply_voice_directive(capture: bool) {
     let Some(win) = web_sys::window() else { return };
@@ -570,6 +589,16 @@ impl OsApp {
         let output = self.egui_ctx.end_pass();
         sync_browser_iframe(&self.shell.as_ref().unwrap().browser_view);
 
+        // Mirror egui copies to the real browser clipboard — egui-winit's
+        // wasm clipboard is internal-only, so Ctrl+C would otherwise never
+        // leave the canvas (UI spec §3: text is selectable everywhere).
+        for cmd in &output.platform_output.commands {
+            if let egui::OutputCommand::CopyText(text) = cmd {
+                if !text.is_empty() {
+                    copy_to_clipboard(text);
+                }
+            }
+        }
         egui_state.handle_platform_output(window, output.platform_output);
         let primitives = self
             .egui_ctx
