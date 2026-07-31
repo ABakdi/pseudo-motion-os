@@ -57,6 +57,8 @@ thread_local! {
     static CAMERA_STATUS: RefCell<Option<(bool, String)>> = const { RefCell::new(None) };
     static CAMERA_PIXELS: RefCell<Option<(Vec<u8>, u32, u32)>> = const { RefCell::new(None) };
     static AI_CHUNKS: RefCell<Vec<(u32, String, bool)>> = const { RefCell::new(Vec::new()) };
+    static VOICE_STATUS: RefCell<Option<(bool, bool, String)>> = const { RefCell::new(None) };
+    static VOICE_TRANSCRIPTS: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
     static VFS_LOADED: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
     static VFS_DIRS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     static VFS_READY: RefCell<Option<bool>> = const { RefCell::new(None) };
@@ -143,6 +145,18 @@ pub fn pmos_ai_chunk(agent: u32, delta: String, done: bool) {
     AI_CHUNKS.with(|q| q.borrow_mut().push((agent, delta, done)));
 }
 
+/// Called by speech.js when the recognition engine starts, ends, or fails.
+#[wasm_bindgen]
+pub fn pmos_voice_status(listening: bool, available: bool, reason: String) {
+    VOICE_STATUS.with(|s| *s.borrow_mut() = Some((listening, available, reason)));
+}
+
+/// Called by speech.js with interim (live) and final transcript text.
+#[wasm_bindgen]
+pub fn pmos_voice_transcript(text: String, is_final: bool) {
+    VOICE_TRANSCRIPTS.with(|q| q.borrow_mut().push((text, is_final)));
+}
+
 /// Preview pixels for the Hand Tracker viewer (RGBA, mirrored). These go
 /// straight into an egui texture for the shell — deliberately NEVER through
 /// the kernel (Hand Gestures spec §7 privacy boundary).
@@ -193,6 +207,20 @@ fn sync_browser_iframe(view: &Option<(String, [f32; 4])>) {
     }
 }
 
+/// Apply the kernel voice directive to speech.js (start/stop capture).
+fn apply_voice_directive(capture: bool) {
+    let Some(win) = web_sys::window() else { return };
+    let Ok(g) = js_sys::Reflect::get(&win, &JsValue::from_str("pmosVoice")) else {
+        return;
+    };
+    let method = if capture { "start" } else { "stop" };
+    if let Ok(f) = js_sys::Reflect::get(&g, &JsValue::from_str(method)) {
+        if let Some(f) = f.dyn_ref::<js_sys::Function>() {
+            let _ = f.call0(&g);
+        }
+    }
+}
+
 /// Apply kernel hands-directives to the JS pipeline (configure + start).
 fn apply_hands_directives(d: &pmos_kernel::HandsDirectives, camera_start: bool) {
     let Some(win) = web_sys::window() else { return };
@@ -237,6 +265,7 @@ struct OsApp {
     /// Hand Tracker preview texture (pixels never touch the kernel).
     camera_tex: Option<egui::TextureHandle>,
     applied_hands_generation: u32,
+    applied_voice_generation: u32,
     last_frame_time: f64,
     frame_dt: f32,
     // hand-grab routing (M4/M7): what the closed hand is holding
@@ -275,6 +304,7 @@ impl OsApp {
             boot_time: now_secs(),
             camera_tex: None,
             applied_hands_generation: 0,
+            applied_voice_generation: 0,
             last_frame_time: now_secs(),
             frame_dt: 1.0 / 60.0,
             hand_grab_mode: GrabMode::None,
@@ -338,6 +368,19 @@ impl OsApp {
             self.kernel.hand_frame(&data, hands, viewport, now);
         }
         self.kernel.tick_hands(now);
+
+        // Voice plumbing: engine status + transcripts in, capture intent out.
+        if let Some((listening, available, reason)) = VOICE_STATUS.with(|s| s.borrow_mut().take())
+        {
+            self.kernel.voice_status(listening, available, reason);
+        }
+        for (text, is_final) in VOICE_TRANSCRIPTS.with(|q| std::mem::take(&mut *q.borrow_mut())) {
+            self.kernel.voice_transcript(text, is_final);
+        }
+        if self.kernel.voice_directives.generation != self.applied_voice_generation {
+            self.applied_voice_generation = self.kernel.voice_directives.generation;
+            apply_voice_directive(self.kernel.voice_directives.capture);
+        }
 
         // VFS plumbing: ingest boot-loaded state, then mirror dirty ops out.
         for dir in VFS_DIRS.with(|q| std::mem::take(&mut *q.borrow_mut())) {
