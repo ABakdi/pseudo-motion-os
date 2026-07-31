@@ -41,6 +41,13 @@ pub struct Shell {
     palette: Palette,
     call_since: Option<f64>,
     call_fired: bool,
+    /// 👍/👎 hold state (G9 stage binding: add / remove-newest).
+    thumbs_since: Option<f64>,
+    thumbs_fired: bool,
+    thumbs_down_since: Option<f64>,
+    thumbs_down_fired: bool,
+    /// Deterministic scatter counter for gesture/voice spawns.
+    stage_n: u32,
     conjure_apps: Vec<ConjureApp>,
     toasts: Vec<(String, f64)>,
     /// Set each frame while the Browser window shows a page: (url, content
@@ -80,6 +87,11 @@ impl Shell {
             palette: Palette::new(),
             call_since: None,
             call_fired: false,
+            thumbs_since: None,
+            thumbs_fired: false,
+            thumbs_down_since: None,
+            thumbs_down_fired: false,
+            stage_n: 0,
             conjure_apps: Vec::new(),
             toasts: Vec::new(),
             browser_view: None,
@@ -109,6 +121,12 @@ impl Shell {
                 PaletteOutcome::VoiceStop => {
                     let _ = kernel.syscall(self.pid, Syscall::VoiceCapture { start: false });
                 }
+                PaletteOutcome::StageSpawn(shape) => self.stage_spawn(kernel, shape, now),
+                PaletteOutcome::StageRemoveLast => self.stage_remove_last(kernel, now),
+                PaletteOutcome::StageClear => {
+                    let _ = kernel.syscall(self.pid, Syscall::StageClear);
+                    self.toast("🧹 stage cleared".into(), now);
+                }
                 PaletteOutcome::ToolCall(call) => {
                     let (ok, result) = self.execute_tool(kernel, &call, now);
                     let more = self.palette.tool_result(&call.tool, ok, &result);
@@ -121,6 +139,61 @@ impl Shell {
                 }
             }
         }
+    }
+
+    /// Drop a primitive onto the stage (gesture 👍 / voice "drop a cube").
+    fn stage_spawn(&mut self, kernel: &mut dyn KernelApi, shape: u8, now: f64) {
+        const PALETTE: [[f32; 3]; 5] = [
+            [0.43, 0.91, 1.00],
+            [0.75, 0.52, 0.99],
+            [1.00, 0.62, 0.42],
+            [0.55, 0.95, 0.65],
+            [0.95, 0.85, 0.45],
+        ];
+        let i = self.stage_n;
+        self.stage_n += 1;
+        let x = ((i * 37 + 11) % 13) as f32 * 0.5 - 3.0;
+        let z = ((i * 53 + 7) % 11) as f32 * 0.5 - 2.5;
+        match kernel.syscall(
+            self.pid,
+            Syscall::StageSpawn {
+                shape,
+                pos: [x, 3.5, z],
+                half: 0.45,
+                color: PALETTE[(i % 5) as usize],
+            },
+        ) {
+            Ok(_) => self.toast(
+                format!(
+                    "{} dropped — grab it with ✊ or the mouse",
+                    if shape == 0 { "🧊 cube" } else { "🔮 sphere" }
+                ),
+                now,
+            ),
+            Err(e) => self.toast(format!("⚠ spawn failed: {e:?}"), now),
+        }
+    }
+
+    /// Remove the newest stage object (gesture 👎 / voice "remove the last").
+    fn stage_remove_last(&mut self, kernel: &mut dyn KernelApi, now: f64) {
+        let count = match kernel.syscall(self.pid, Syscall::StageList) {
+            Ok(Reply::Bytes(b)) => serde_json::from_slice::<serde_json::Value>(&b)
+                .ok()
+                .and_then(|v| v.as_array().map(|a| a.len()))
+                .unwrap_or(0),
+            _ => 0,
+        };
+        if count == 0 {
+            self.toast("the stage is already empty".into(), now);
+            return;
+        }
+        let _ = kernel.syscall(
+            self.pid,
+            Syscall::StageRemove {
+                index: (count - 1) as u32,
+            },
+        );
+        self.toast("🗑 removed the newest object".into(), now);
     }
 
     /// Execute one assistant tool call through capability-checked syscalls
@@ -478,6 +551,30 @@ impl Shell {
         // Ctrl+K.
         if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command) {
             self.palette.toggle();
+        }
+
+        // 👍 hold drops a cube on the stage; 👎 hold removes the newest
+        // object (Hand Gestures G9 — v1 stage binding; dialogs will take
+        // precedence once consent sheets land).
+        if self.cursor.tracking && self.cursor.pose == pmos_abi::HandPose::ThumbsUp {
+            let since = *self.thumbs_since.get_or_insert(now);
+            if now - since >= 0.6 && !self.thumbs_fired {
+                self.thumbs_fired = true;
+                self.stage_spawn(kernel, 0, now);
+            }
+        } else {
+            self.thumbs_since = None;
+            self.thumbs_fired = false;
+        }
+        if self.cursor.tracking && self.cursor.pose == pmos_abi::HandPose::ThumbsDown {
+            let since = *self.thumbs_down_since.get_or_insert(now);
+            if now - since >= 0.6 && !self.thumbs_down_fired {
+                self.thumbs_down_fired = true;
+                self.stage_remove_last(kernel, now);
+            }
+        } else {
+            self.thumbs_down_since = None;
+            self.thumbs_down_fired = false;
         }
 
         self.browser_view = None;

@@ -74,6 +74,10 @@ pub enum PaletteOutcome {
     Prompt(AgentId, String),
     /// Cancel speech capture (Esc while listening).
     VoiceStop,
+    /// Direct stage commands ("drop a cube") — instant, no LLM round-trip.
+    StageSpawn(u8),
+    StageRemoveLast,
+    StageClear,
     /// The assistant asked for a tool run — the shell executes it via
     /// capability-checked syscalls and reports back with `tool_result`.
     ToolCall(ToolCall),
@@ -402,6 +406,33 @@ impl Palette {
             return vec![PaletteOutcome::SpawnConjure(
                 include_str!("../../pmos-conjure/examples/pomodoro.conjure.json").to_string(),
             )];
+        }
+
+        // Direct stage commands — instant, voice-friendly, no LLM round-trip.
+        // Anything fancier ("build me a tower") falls through to the
+        // assistant, which has the full stage tools.
+        let cube = lower.contains("cube") || lower.contains("box");
+        let ball = lower.contains("sphere") || lower.contains("ball");
+        if (cube || ball)
+            && ["drop", "spawn", "add ", "give me"]
+                .iter()
+                .any(|v| lower.contains(v))
+        {
+            self.lines.push(Line::System(
+                if ball { "🔮 dropping a sphere" } else { "🧊 dropping a cube" }.into(),
+            ));
+            return vec![PaletteOutcome::StageSpawn(if ball { 1 } else { 0 })];
+        }
+        if lower.contains("clear") && lower.contains("stage") {
+            self.lines.push(Line::System("🧹 clearing the stage".into()));
+            return vec![PaletteOutcome::StageClear];
+        }
+        if (lower.contains("remove") || lower.contains("delete") || lower.contains("undo"))
+            && (lower.contains("last") || lower.contains("object") || cube || ball)
+        {
+            self.lines
+                .push(Line::System("🗑 removing the newest object".into()));
+            return vec![PaletteOutcome::StageRemoveLast];
         }
         for kind in ALL {
             if kind.title().to_lowercase().contains(&cmd) {
