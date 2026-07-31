@@ -12,6 +12,10 @@ Entry format:
 
 ---
 
+## [2026-07-31] — WebLLM: auto-select fp32 model variants on GPUs without shader-f16
+### Code
+- `webllm.js`: q4f16 model builds need WebGPU's `shader-f16` feature, which many Linux Vulkan drivers lack — pipeline creation died with "Invalid ShaderModule" (user-reported on Brave/Linux). The bridge now probes adapter features up front and swaps `q4f16`→`q4f32` in the model id when f16 is unsupported, and if a driver *claims* f16 but still rejects the shaders, retries once on the fp32 variant and remembers for the session.
+
 ## [2026-07-31] — AI with zero setup: in-browser WebLLM becomes the default provider
 ### Code
 - ABI 1.6: provider kind 2 = in-browser WebLLM; `AiChunk` deltas starting with `'\r'` REPLACE accumulated text (transient progress lines that never pollute history).
