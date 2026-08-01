@@ -100,7 +100,7 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 - [x] **Tauri shell** — `crates/pmos-desktop` scaffold (Tauri 2, wraps the same `dist/`), deliberately **outside the workspace** so native GUI deps never gate the web build; build steps in [[Running Locally]]. *(Untested here — needs webkit2gtk; native FS mounts + child-webview browsing remain follow-ups.)*
 - [x] **Performance pass** — release bundle with `wasm-opt -z` + LTO + `opt-level=s`: **6.5 MB wasm** (from 51 MB debug), ~6.6 MB total static bundle.
 - [x] **Demo golden path** — [[Demo]]: the scripted five-minute showcase with speaker lines and fallbacks.
-- [x] **Deploy** — GitHub Actions CI: tests + wasm check on every push; release build deployed to GitHub Pages from master (`--public-url /pseudo-motion-os/`). *(One-time repo setting needed: Pages → Source → GitHub Actions.)*
+- [x] **Deploy** — GitHub Actions CI: tests + wasm check on every push; release build deployed to GitHub Pages from master (`--public-url /pseudo-motion-os/`). *(Pages enabled 2026-08-01 — the missing one-time setting was why every deploy failed; the site is live.)*
 
 ## Post-release — Field-testing stabilization
 *Bugs and tuning found by using the OS for real, after the roadmap's core shipped.*

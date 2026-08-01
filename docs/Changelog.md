@@ -12,6 +12,10 @@ Entry format:
 
 ---
 
+## [2026-08-01] — GitHub Pages live: deploy failures diagnosed and fixed
+### Infra
+- Every CI run since M8 built and tested green but died on `actions/deploy-pages`: **GitHub Pages was never enabled on the repo** (the documented one-time setting). Enabled via the API (`build_type: workflow`), re-ran the failed deploy job — **the site is live at <https://abakdi.github.io/pseudo-motion-os/>** (7.6 MB wasm served). Future master pushes deploy automatically.
+
 ## [2026-08-01] — "Create a rotating cube" goes to the stage, and it actually rotates
 ### Code
 - Routing (user-reported): "create a rotating cube" started the App Smith (2D-app generator), which then failed on the small in-browser model ("returned no JSON"). Stage-object phrases (cube/sphere/ball + make/create/build/drop/spawn) now route to the stage BEFORE the App Smith; say "app" ("make me a cube app") to force conjuring.
