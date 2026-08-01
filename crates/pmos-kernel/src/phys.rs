@@ -194,14 +194,15 @@ impl Physics {
         }
     }
 
-    /// Push a prop (stage syscalls, ABI 1.8) — physics does the animating.
-    pub fn impulse_prop(&mut self, index: usize, imp: Vec3) -> bool {
+    /// Push and/or spin a prop (stage syscalls) — physics does the animating.
+    pub fn impulse_prop(&mut self, index: usize, imp: Vec3, torque: Vec3) -> bool {
         let Some(prop) = self.props.get(index) else {
             return false;
         };
         match self.bodies.get_mut(prop.body) {
             Some(body) => {
                 body.apply_impulse(vector![imp.x, imp.y, imp.z], true);
+                body.apply_torque_impulse(vector![torque.x, torque.y, torque.z], true);
                 true
             }
             None => false,

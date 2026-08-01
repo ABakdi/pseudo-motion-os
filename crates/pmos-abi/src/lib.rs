@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 8);
+pub const ABI_VERSION: (u16, u16) = (1, 9);
 
 // ---------- handles ----------
 
@@ -174,10 +174,12 @@ pub enum Syscall {
     },
     /// Remove every spawned object.
     StageClear,
-    /// Apply a physics impulse to the object at `index` (push/throw).
+    /// Apply a physics impulse to the object at `index`: `impulse` is linear
+    /// (push/throw), `torque` is angular (spin) — ABI 1.9.
     StageImpulse {
         index: u32,
         impulse: [f32; 3],
+        torque: [f32; 3],
     },
     /// List spawned objects. Replies `Bytes(JSON)`:
     /// `[{"index","shape","size","color","pos"}...]`.

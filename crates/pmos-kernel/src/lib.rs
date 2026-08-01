@@ -478,9 +478,17 @@ impl KernelApi for Kernel {
                 self.phys.clear_props();
                 Ok(Reply::None)
             }
-            Syscall::StageImpulse { index, impulse } => {
+            Syscall::StageImpulse {
+                index,
+                impulse,
+                torque,
+            } => {
                 self.require(caller, &Capability::PhysSpawn)?;
-                if self.phys.impulse_prop(index as usize, glam::Vec3::from(impulse)) {
+                if self.phys.impulse_prop(
+                    index as usize,
+                    glam::Vec3::from(impulse),
+                    glam::Vec3::from(torque),
+                ) {
                     Ok(Reply::None)
                 } else {
                     Err(ErrorCode::NotFound)

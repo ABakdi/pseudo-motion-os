@@ -216,7 +216,7 @@ Stage tools — the 3D space behind the windows. Objects are PHYSICS bodies: the
 - stage_spawn {"shape":"cube"|"sphere","x":0,"y":3,"z":0,"size":0.45,"color":"#6ee7ff"} — returns its index
 - stage_list {} — every object's index, shape, size, color, position
 - stage_remove {"index":0} · stage_clear {}
-- stage_push {"index":0,"x":0,"y":6,"z":0} — impulse: throw, bounce, nudge
+- stage_push {"index":0,"x":0,"y":6,"z":0,"rx":0,"ry":3,"rz":0} — linear impulse (throw/bounce) + torque (spin)
 - stage_light {"azimuth":215,"elevation":60,"intensity":1.0,"ambient":0.22} — the sun (sunset = low elevation, intensity ~1.4, ambient ~0.1)
 
 Build little "models" by composing spawns (a tower = cubes stacked at one x,z with rising y and gravity settling them; a snowman = three spheres of shrinking size). Animate by pushing objects. Check stage_list before removing or pushing.
