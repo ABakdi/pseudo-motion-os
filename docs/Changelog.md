@@ -12,6 +12,14 @@ Entry format:
 
 ---
 
+## [2026-08-01] — "Create a rotating cube" goes to the stage, and it actually rotates
+### Code
+- Routing (user-reported): "create a rotating cube" started the App Smith (2D-app generator), which then failed on the small in-browser model ("returned no JSON"). Stage-object phrases (cube/sphere/ball + make/create/build/drop/spawn) now route to the stage BEFORE the App Smith; say "app" ("make me a cube app") to force conjuring.
+- "rotating"/"spinning" spawns now spin: `StageImpulse` gains a `torque` field (ABI 1.9, `apply_torque_impulse`); the assistant's `stage_push` tool accepts `rx/ry/rz` torque too.
+- The App Smith no-JSON error now says why and what to do (small model → Quality tier or remote provider).
+### Specs
+- [[AI System]] §3.1 `stage_push` doc updated.
+
 ## [2026-08-01] — Stage control by gesture and voice
 ### Code
 - Gestures: 👍 held 0.6 s drops a cube (deterministic scatter, palette colors, toast confirms); 👎 held removes the newest object — G9's v1 idle binding; dialogs will take precedence when consent sheets land. Grab/throw with ✊ already worked (modality parity).
