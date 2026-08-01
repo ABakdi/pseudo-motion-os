@@ -307,6 +307,8 @@ struct OsApp {
     /// Left button held — the mouse owns the egui pointer while true, so
     /// hand-tracking Move events must not hijack drags or text selection.
     mouse_left_down: bool,
+    /// Shift held (winit modifiers) — shift+drag pans the stage camera.
+    shift_down: bool,
     /// Last hand cursor position forwarded to egui (sub-point jitter from a
     /// resting hand would otherwise fight the mouse for the pointer).
     last_hand_move: Option<[f32; 2]>,
@@ -318,6 +320,8 @@ enum GrabMode {
     Ui,
     Prop,
     Orbit,
+    /// Camera pan (shift+drag or middle-drag over empty stage).
+    Pan,
 }
 
 impl OsApp {
@@ -348,6 +352,7 @@ impl OsApp {
             last_cursor: None,
             last_press: 0.0,
             mouse_left_down: false,
+            shift_down: false,
             last_hand_move: None,
         }
     }
@@ -564,6 +569,14 @@ impl OsApp {
                         modifiers: egui::Modifiers::default(),
                     });
                 }
+                HandIntent::Scroll { pos, dy } if !self.egui_ctx.is_pointer_over_egui() => {
+                    // ✌ over the empty stage zooms the camera; over UI it
+                    // scrolls (modality parity with the mouse wheel).
+                    if let Some(gfx) = self.kernel.gfx.as_mut() {
+                        gfx.camera.zoom(dy * 0.06);
+                    }
+                    let _ = pos;
+                }
                 HandIntent::Scroll { pos, dy } => {
                     ev.push(egui::Event::PointerMoved(p(pos)));
                     // Natural scrolling: hand moves down → content moves down.
@@ -605,7 +618,7 @@ impl OsApp {
                                 );
                             }
                         }
-                        GrabMode::None => {}
+                        GrabMode::None | GrabMode::Pan => {}
                     }
                     self.hand_grab_last = pos;
                 }
@@ -756,7 +769,9 @@ impl ApplicationHandler for OsApp {
                         .last_cursor
                         .map(|(x, y)| [x / ppp, y / ppp])
                         .unwrap_or([0.0, 0.0]);
-                    self.mouse_mode = if self.kernel.try_grab_prop(pos_pts, viewport) {
+                    self.mouse_mode = if self.shift_down {
+                        GrabMode::Pan
+                    } else if self.kernel.try_grab_prop(pos_pts, viewport) {
                         GrabMode::Prop
                     } else {
                         GrabMode::Orbit
@@ -768,6 +783,21 @@ impl ApplicationHandler for OsApp {
                     self.mouse_mode = GrabMode::None;
                 }
             }
+            // Middle-drag pans the stage camera.
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Middle,
+                ..
+            } => {
+                self.mouse_mode = if state == ElementState::Pressed && !egui_wants {
+                    GrabMode::Pan
+                } else {
+                    GrabMode::None
+                };
+            }
+            WindowEvent::ModifiersChanged(mods) => {
+                self.shift_down = mods.state().shift_key();
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 let pos = (position.x as f32, position.y as f32);
                 match self.mouse_mode {
@@ -776,6 +806,13 @@ impl ApplicationHandler for OsApp {
                             (self.last_cursor, self.kernel.gfx.as_mut())
                         {
                             gfx.camera.orbit(pos.0 - last.0, pos.1 - last.1);
+                        }
+                    }
+                    GrabMode::Pan => {
+                        if let (Some(last), Some(gfx)) =
+                            (self.last_cursor, self.kernel.gfx.as_mut())
+                        {
+                            gfx.camera.pan(pos.0 - last.0, pos.1 - last.1);
                         }
                     }
                     GrabMode::Prop => {

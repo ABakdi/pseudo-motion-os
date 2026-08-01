@@ -37,6 +37,17 @@ impl OrbitCamera {
         self.dist = (self.dist * (1.0 - delta * 0.1)).clamp(DIST_RANGE.0, DIST_RANGE.1);
     }
 
+    /// Pan the orbit target in the view plane ("grab the world" feel:
+    /// the scene follows the drag). Clamped so the stage stays in reach.
+    pub fn pan(&mut self, dx: f32, dy: f32) {
+        let right = Vec3::new(self.yaw.cos(), 0.0, -self.yaw.sin());
+        let scale = self.dist * 0.0016;
+        self.target -= right * (dx * scale);
+        self.target.y = (self.target.y + dy * scale).clamp(0.2, 8.0);
+        self.target.x = self.target.x.clamp(-10.0, 10.0);
+        self.target.z = self.target.z.clamp(-10.0, 10.0);
+    }
+
     pub fn eye(&self) -> Vec3 {
         self.target
             + self.dist
