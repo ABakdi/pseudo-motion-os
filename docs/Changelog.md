@@ -12,6 +12,12 @@ Entry format:
 
 ---
 
+## [2026-08-01] — Stage navigation: camera pan and hand zoom
+### Code
+- `OrbitCamera::pan` — view-plane target panning with clamps (the galaxy stays unreachable); shift+left-drag or middle-drag over empty stage pans, "grab the world" direction.
+- Hand ✌ (TwoFinger) over the empty stage now ZOOMS the camera; over UI it still scrolls — modality parity with the mouse wheel. ✊ orbit/grab/throw unchanged.
+- Settings footer documents the full control map.
+
 ## [2026-08-01] — GitHub Pages live: deploy failures diagnosed and fixed
 ### Infra
 - Every CI run since M8 built and tested green but died on `actions/deploy-pages`: **GitHub Pages was never enabled on the repo** (the documented one-time setting). Enabled via the API (`build_type: workflow`), re-ran the failed deploy job — **the site is live at <https://abakdi.github.io/pseudo-motion-os/>** (7.6 MB wasm served). Future master pushes deploy automatically.
