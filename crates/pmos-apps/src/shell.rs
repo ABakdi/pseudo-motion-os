@@ -121,7 +121,9 @@ impl Shell {
                 PaletteOutcome::VoiceStop => {
                     let _ = kernel.syscall(self.pid, Syscall::VoiceCapture { start: false });
                 }
-                PaletteOutcome::StageSpawn(shape) => self.stage_spawn(kernel, shape, now),
+                PaletteOutcome::StageSpawn { shape, spin } => {
+                    self.stage_spawn(kernel, shape, spin, now)
+                }
                 PaletteOutcome::StageRemoveLast => self.stage_remove_last(kernel, now),
                 PaletteOutcome::StageClear => {
                     let _ = kernel.syscall(self.pid, Syscall::StageClear);
@@ -142,7 +144,8 @@ impl Shell {
     }
 
     /// Drop a primitive onto the stage (gesture 👍 / voice "drop a cube").
-    fn stage_spawn(&mut self, kernel: &mut dyn KernelApi, shape: u8, now: f64) {
+    /// `spin` starts it with a torque impulse ("a rotating cube").
+    fn stage_spawn(&mut self, kernel: &mut dyn KernelApi, shape: u8, spin: bool, now: f64) {
         const PALETTE: [[f32; 3]; 5] = [
             [0.43, 0.91, 1.00],
             [0.75, 0.52, 0.99],
@@ -163,13 +166,29 @@ impl Shell {
                 color: PALETTE[(i % 5) as usize],
             },
         ) {
-            Ok(_) => self.toast(
-                format!(
-                    "{} dropped — grab it with ✊ or the mouse",
-                    if shape == 0 { "🧊 cube" } else { "🔮 sphere" }
-                ),
-                now,
-            ),
+            Ok(reply) => {
+                if spin {
+                    if let Reply::Bytes(b) = &reply {
+                        if let Ok(index) = String::from_utf8_lossy(b).trim().parse::<u32>() {
+                            let _ = kernel.syscall(
+                                self.pid,
+                                Syscall::StageImpulse {
+                                    index,
+                                    impulse: [0.0, 0.0, 0.0],
+                                    torque: [0.0, 2.5, 0.4],
+                                },
+                            );
+                        }
+                    }
+                }
+                self.toast(
+                    format!(
+                        "{} dropped — grab it with ✊ or the mouse",
+                        if shape == 0 { "🧊 cube" } else { "🔮 sphere" }
+                    ),
+                    now,
+                );
+            }
             Err(e) => self.toast(format!("⚠ spawn failed: {e:?}"), now),
         }
     }
@@ -331,6 +350,7 @@ impl Shell {
                     Syscall::StageImpulse {
                         index,
                         impulse: [f("x"), f("y"), f("z")],
+                        torque: [f("rx"), f("ry"), f("rz")],
                     },
                 ) {
                     Ok(_) => (true, "pushed".into()),
@@ -560,7 +580,7 @@ impl Shell {
             let since = *self.thumbs_since.get_or_insert(now);
             if now - since >= 0.6 && !self.thumbs_fired {
                 self.thumbs_fired = true;
-                self.stage_spawn(kernel, 0, now);
+                self.stage_spawn(kernel, 0, false, now);
             }
         } else {
             self.thumbs_since = None;

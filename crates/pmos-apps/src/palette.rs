@@ -75,7 +75,8 @@ pub enum PaletteOutcome {
     /// Cancel speech capture (Esc while listening).
     VoiceStop,
     /// Direct stage commands ("drop a cube") — instant, no LLM round-trip.
-    StageSpawn(u8),
+    /// `spin` adds a torque impulse ("a rotating cube").
+    StageSpawn { shape: u8, spin: bool },
     StageRemoveLast,
     StageClear,
     /// The assistant asked for a tool run — the shell executes it via
@@ -297,8 +298,11 @@ impl Palette {
         let json = match (raw.find('{'), raw.rfind('}')) {
             (Some(a), Some(b)) if b > a => raw[a..=b].to_string(),
             _ => {
-                self.lines
-                    .push(Line::System("⚠ the App Smith returned no JSON".into()));
+                self.lines.push(Line::System(
+                    "⚠ the App Smith returned no JSON — small in-browser models often can't; \
+                     try the Quality tier or a remote provider (Settings → AI)"
+                        .into(),
+                ));
                 self.smith = Smith::default();
                 return Vec::new();
             }
@@ -369,8 +373,41 @@ impl Palette {
             return vec![PaletteOutcome::Prompt(AGENT_ASSISTANT, q.trim().into())];
         }
 
-        // App conjuring.
         let lower = text.to_lowercase();
+
+        // Stage-object phrases BEFORE the App Smith: "create a rotating
+        // cube" means a 3D object on the stage, not a windowed app (say
+        // "app" to force the App Smith: "make me a cube app").
+        let cube = lower.contains("cube") || lower.contains("box");
+        let ball = lower.contains("sphere") || lower.contains("ball");
+        if (cube || ball) && !lower.contains("app") {
+            if ["drop", "spawn", "add ", "give me", "make", "create", "build"]
+                .iter()
+                .any(|v| lower.contains(v))
+            {
+                let spin = lower.contains("rotat") || lower.contains("spin");
+                self.lines.push(Line::System(
+                    match (ball, spin) {
+                        (true, true) => "🔮 dropping a spinning sphere",
+                        (true, false) => "🔮 dropping a sphere",
+                        (false, true) => "🧊 dropping a spinning cube",
+                        (false, false) => "🧊 dropping a cube",
+                    }
+                    .into(),
+                ));
+                return vec![PaletteOutcome::StageSpawn {
+                    shape: if ball { 1 } else { 0 },
+                    spin,
+                }];
+            }
+            if lower.contains("remove") || lower.contains("delete") || lower.contains("undo") {
+                self.lines
+                    .push(Line::System("🗑 removing the newest object".into()));
+                return vec![PaletteOutcome::StageRemoveLast];
+            }
+        }
+
+        // App conjuring.
         if ["make ", "create ", "build ", "conjure "]
             .iter()
             .any(|p| lower.starts_with(p))
@@ -408,27 +445,13 @@ impl Palette {
             )];
         }
 
-        // Direct stage commands — instant, voice-friendly, no LLM round-trip.
-        // Anything fancier ("build me a tower") falls through to the
-        // assistant, which has the full stage tools.
-        let cube = lower.contains("cube") || lower.contains("box");
-        let ball = lower.contains("sphere") || lower.contains("ball");
-        if (cube || ball)
-            && ["drop", "spawn", "add ", "give me"]
-                .iter()
-                .any(|v| lower.contains(v))
-        {
-            self.lines.push(Line::System(
-                if ball { "🔮 dropping a sphere" } else { "🧊 dropping a cube" }.into(),
-            ));
-            return vec![PaletteOutcome::StageSpawn(if ball { 1 } else { 0 })];
-        }
+        // Remaining stage phrases (object words handled above the App Smith).
         if lower.contains("clear") && lower.contains("stage") {
             self.lines.push(Line::System("🧹 clearing the stage".into()));
             return vec![PaletteOutcome::StageClear];
         }
         if (lower.contains("remove") || lower.contains("delete") || lower.contains("undo"))
-            && (lower.contains("last") || lower.contains("object") || cube || ball)
+            && (lower.contains("last") || lower.contains("object"))
         {
             self.lines
                 .push(Line::System("🗑 removing the newest object".into()));
