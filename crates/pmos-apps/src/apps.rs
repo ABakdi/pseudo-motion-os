@@ -1203,7 +1203,8 @@ impl AppState {
         ui.add_space(10.0);
         ui.separator();
         ui.weak("Gestures are tuned in the Hand Tracker app.");
-        ui.weak("Stage camera: drag = orbit · wheel = zoom · Home = reset");
+        ui.weak("Stage: drag = orbit · wheel = zoom · shift/middle-drag = pan · Home/double-click = reset");
+        ui.weak("Hands: ✊ grab & throw (empty space = orbit) · ✌ over the stage = zoom");
     }
 
     /// Settings → Stage (ABI 1.8): spawn/clear physics objects, sun control.
