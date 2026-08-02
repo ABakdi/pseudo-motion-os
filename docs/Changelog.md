@@ -12,6 +12,14 @@ Entry format:
 
 ---
 
+## [2026-08-02] — Voice that discerns intent; the kit blends in; conjure truncation named
+### Code
+- **Auto command detection** (user request: "it should know what to do"): spoken utterances that are self-evidently commands or questions — open/drop/make/search verbs, question words, or a trailing "?" — route automatically without ⌘ arming; plain statements stay transcript-only (anti-Midas holds).
+- **Site fast path**: "open the browser on github" / "go to wikipedia.org" opens the Browser at the right URL instantly — known site names map to homepages, dotted tokens become domains; no LLM involved.
+- **"Nothing happened" is impossible now**: speech that falls through to the assistant prints "🤖 asking the assistant…" in the palette immediately, and app-name matching works in both directions ("browser on github" still launches the Browser path).
+- **Voice Kit blends with the stage** (user request): window chrome dropped — a translucent whisper of fill, no border, no shadow.
+- **Conjure truncation diagnosed** (user-reported "error in line 144"): the in-browser model was running out of output tokens mid-JSON, so the parser failed deep inside the document. WebLLM max_tokens raised 2048→3500, and an incomplete-JSON failure now says the real cause and points at the Quality tier instead of quoting a line number.
+
 ## [2026-08-02] — M9 closes: CANCEL, object focus, second-hand editing, mouth-toggle
 ### Code
 - **CANCEL sign**: ✋ pushed toward the camera — detected as rapid palm-scale growth (3 frames above 1.0×/s), no depth data needed. Closes the palette, disarms ⌘, clears object focus. Engine test included.

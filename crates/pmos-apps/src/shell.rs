@@ -123,6 +123,16 @@ impl Shell {
                 PaletteOutcome::Prompt(agent, msg) => {
                     let _ = kernel.syscall(self.pid, Syscall::AiPrompt { agent, msg });
                 }
+                PaletteOutcome::OpenUrl(url) => {
+                    self.launch(kernel, AppKind::Browser);
+                    if let Some(app) = self
+                        .open_apps
+                        .iter_mut()
+                        .find(|a| a.state.kind == AppKind::Browser)
+                    {
+                        app.state.browser_open(&url);
+                    }
+                }
                 PaletteOutcome::VoiceStop => {
                     let _ = kernel.syscall(self.pid, Syscall::VoiceCapture { start: false });
                 }
@@ -663,9 +673,12 @@ impl Shell {
                             self.palette_voice = false;
                         }
                     } else if is_final {
-                        // Ambient transcript → the Voice Kit; ⌘-armed
-                        // utterances route as commands with AI context.
-                        let is_cmd = self.voicekit.command_armed;
+                        // Ambient transcript → the Voice Kit. Commands are
+                        // either ⌘-armed OR self-evident: clear command verbs
+                        // and question words route automatically (user
+                        // request: "it should know what to do").
+                        let is_cmd =
+                            self.voicekit.command_armed || looks_like_command(&text);
                         self.voicekit.command_armed = false;
                         self.voicekit
                             .on_final(&text, is_cmd, kernel, self.pid, today, now);
@@ -1078,6 +1091,20 @@ impl Shell {
                 });
             });
     }
+}
+
+/// Spoken text that is obviously a command or question routes without ⌘
+/// arming. Conservative: statements that match nothing stay transcript-only.
+fn looks_like_command(text: &str) -> bool {
+    let l = text.trim().to_lowercase();
+    const STARTS: &[&str] = &[
+        "open ", "go to ", "visit ", "launch ", "start ", "show ", "close ",
+        "drop ", "spawn ", "add ", "remove ", "delete ", "clear ", "make ",
+        "create ", "build ", "conjure ", "search ", "find ", "ask ",
+        "what", "who ", "where ", "when ", "why ", "how ", "can you", "could you",
+        "please ", "tell me", "give me",
+    ];
+    STARTS.iter().any(|p| l.starts_with(p)) || l.ends_with('?')
 }
 
 /// Minimal percent-encoding for query strings.

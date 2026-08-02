@@ -151,8 +151,11 @@ impl VoiceKit {
             .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 34.0))
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                egui::Frame::window(ui.style())
-                    .corner_radius(egui::CornerRadius::same(10))
+                // Blends with the stage (user request): no window chrome —
+                // a whisper of fill, no border, no shadow.
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgba_unmultiplied(0x0d, 0x0f, 0x1c, 0x70))
+                    .corner_radius(egui::CornerRadius::same(12))
                     .inner_margin(egui::Margin::symmetric(10, 6))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {

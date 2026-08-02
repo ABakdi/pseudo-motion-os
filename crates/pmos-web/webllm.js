@@ -109,7 +109,7 @@
       messages,
       stream: true,
       temperature: 0.7,
-      max_tokens: 2048,
+      max_tokens: 3500,
     });
     for await (const c of stream) {
       const delta = c.choices?.[0]?.delta?.content;

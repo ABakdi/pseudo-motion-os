@@ -73,6 +73,8 @@ pub enum PaletteOutcome {
     Prompt(AgentId, String),
     /// Cancel speech capture (Esc while listening).
     VoiceStop,
+    /// Open a URL in the Browser app ("open the browser on github").
+    OpenUrl(String),
     /// Direct stage commands ("drop a cube") — instant, no LLM round-trip.
     /// `spin` adds a torque impulse ("a rotating cube").
     StageSpawn { shape: u8, spin: bool },
@@ -306,6 +308,21 @@ impl Palette {
                 return Vec::new();
             }
         };
+        // A JSON parse failure deep into the document usually means the
+        // model ran out of output tokens mid-file (user-reported "error in
+        // line 144") — say so instead of quoting a line number.
+        if serde_json::from_str::<serde_json::Value>(&json).is_err()
+            && json.len() > 400
+            && !json.trim_end().ends_with('}')
+        {
+            self.lines.push(Line::System(
+                "⚠ the model ran out of room mid-document — the Quality tier \
+                 (Settings → AI) or a remote provider writes complete apps"
+                    .into(),
+            ));
+            self.smith = Smith::default();
+            return Vec::new();
+        }
         match pmos_conjure::validate(&json) {
             Ok(doc) => {
                 self.lines.push(Line::System(format!(
@@ -427,6 +444,14 @@ impl Palette {
             return vec![PaletteOutcome::Prompt(AGENT_APP_SMITH, text)];
         }
 
+        // "Open the browser on github" / "go to wikipedia.org": a named
+        // site opens directly in the Browser — no LLM round-trip.
+        if let Some(url) = site_request(&lower) {
+            self.lines
+                .push(Line::System(format!("🌐 opening {url}")));
+            return vec![PaletteOutcome::OpenUrl(url)];
+        }
+
         // Commands. Spoken phrasing arrives as "open the terminal" — strip
         // launch verbs and articles before matching app names.
         let cmd = {
@@ -460,12 +485,17 @@ impl Palette {
             return vec![PaletteOutcome::StageRemoveLast];
         }
         for kind in ALL {
-            if kind.title().to_lowercase().contains(&cmd) {
+            let title = kind.title().to_lowercase();
+            if title.contains(&cmd) || cmd.contains(&title) {
                 self.open = false;
                 return vec![PaletteOutcome::Launch(kind)];
             }
         }
         if voice {
+            // Visible feedback the instant speech routes to the AI —
+            // "nothing happened" must be impossible (user-reported).
+            self.lines
+                .push(Line::System("🤖 asking the assistant…".into()));
             self.assistant_streaming = true;
             self.tool_rounds = 0;
             self.lines.push(Line::Assistant(String::new()));
@@ -569,6 +599,37 @@ impl Palette {
         }
         outcomes
     }
+}
+
+/// Detect "open/go to <site>" phrasing and produce a URL. Known names map
+/// to their homepages; anything containing a dot is treated as a domain.
+fn site_request(lower: &str) -> Option<String> {
+    let verbs = ["open", "go to", "goto", "visit", "browse"];
+    if !verbs.iter().any(|v| lower.contains(v)) {
+        return None;
+    }
+    const SITES: &[(&str, &str)] = &[
+        ("github", "https://github.com"),
+        ("wikipedia", "https://en.wikipedia.org"),
+        ("youtube", "https://www.youtube.com"),
+        ("google", "https://www.google.com"),
+        ("hacker news", "https://news.ycombinator.com"),
+        ("reddit", "https://www.reddit.com"),
+        ("stack overflow", "https://stackoverflow.com"),
+    ];
+    for (name, url) in SITES {
+        if lower.contains(name) {
+            return Some(url.to_string());
+        }
+    }
+    // "open example.com"
+    for word in lower.split_whitespace() {
+        let w = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '-');
+        if w.contains('.') && !w.starts_with('.') && !w.ends_with('.') && w.len() > 3 {
+            return Some(format!("https://{w}"));
+        }
+    }
+    None
 }
 
 impl Default for Palette {
