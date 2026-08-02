@@ -33,10 +33,6 @@ pub struct Shell {
     cursor: HandCursor,
     /// Latest raw landmark frame (viewer overlay; capability-gated events).
     raw_hands: (Vec<f32>, u8),
-    /// Launcher overlay (UI spec §2.3): open-palm hold or dock ≡.
-    launcher_open: bool,
-    palm_since: Option<f64>,
-    palm_fired: bool,
     /// The command palette (UI spec §2.4).
     palette: Palette,
     call_since: Option<f64>,
@@ -81,9 +77,6 @@ impl Shell {
             open_apps: Vec::new(),
             cursor: HandCursor::new(),
             raw_hands: (Vec::new(), 0),
-            launcher_open: false,
-            palm_since: None,
-            palm_fired: false,
             palette: Palette::new(),
             call_since: None,
             call_fired: false,
@@ -114,7 +107,6 @@ impl Shell {
         for outcome in outcomes {
             match outcome {
                 PaletteOutcome::Launch(kind) => self.launch(kernel, kind),
-                PaletteOutcome::OpenLauncher => self.launcher_open = true,
                 PaletteOutcome::Prompt(agent, msg) => {
                     let _ = kernel.syscall(self.pid, Syscall::AiPrompt { agent, msg });
                 }
@@ -535,20 +527,8 @@ impl Shell {
             self.raw_hands.1 = 0;
         }
 
-        // Open-palm hold toggles the launcher (Hand Gestures spec G5).
-        if self.cursor.tracking && self.cursor.pose == pmos_abi::HandPose::OpenPalm {
-            let since = *self.palm_since.get_or_insert(now);
-            if now - since >= 0.6 && !self.palm_fired {
-                self.launcher_open = !self.launcher_open;
-                self.palm_fired = true;
-            }
-        } else {
-            self.palm_since = None;
-            self.palm_fired = false;
-        }
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.launcher_open = false;
-        }
+        // (The Launcher was removed entirely — user decision 2026-08-01.
+        // The open palm belongs to the RECORD sign, CSL spec §4.)
 
         // 🤙 tap toggles the palette; 🤙 HELD ≥ 0.6 s opens it in voice mode
         // and starts speech capture (Hand Gestures spec G8). The dwell makes
@@ -602,7 +582,6 @@ impl Shell {
         self.windows(ctx, kernel, camera_feed, rt_tex, today, now);
         self.conjure_windows(ctx, kernel, now);
         self.dock(ctx, kernel);
-        self.launcher(ctx, kernel);
         let palette_outcomes = self.palette.ui(ctx);
         self.handle_outcomes(palette_outcomes, kernel, now);
         self.draw_toasts(ctx, now);
@@ -677,85 +656,6 @@ impl Shell {
                         });
                 }
             });
-    }
-
-    /// The launcher overlay (UI spec §2.3): a dimmed layer with the app grid.
-    fn launcher(&mut self, ctx: &egui::Context, kernel: &mut dyn KernelApi) {
-        if !self.launcher_open {
-            return;
-        }
-        let screen = ctx.content_rect();
-        let mut clicked: Option<AppKind> = None;
-        let mut close = false;
-        egui::Area::new(egui::Id::new("launcher"))
-            .fixed_pos(screen.min)
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                // Dim the world; clicking the backdrop closes.
-                let resp = ui.allocate_response(screen.size(), egui::Sense::click());
-                ui.painter()
-                    .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(160));
-                if resp.clicked() {
-                    close = true;
-                }
-            });
-        egui::Area::new(egui::Id::new("launcher-grid"))
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -30.0))
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                egui::Frame::window(ui.style())
-                    .corner_radius(egui::CornerRadius::same(18))
-                    .inner_margin(egui::Margin::same(24))
-                    .show(ui, |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                egui::RichText::new("Launcher")
-                                    .size(18.0)
-                                    .color(theme::INK_DIM),
-                            );
-                            ui.add_space(14.0);
-                            egui::Grid::new("launcher-apps")
-                                .num_columns(3)
-                                .spacing([18.0, 18.0])
-                                .show(ui, |ui| {
-                                    for (i, kind) in ALL.iter().enumerate() {
-                                        let tile = ui
-                                            .add_sized(
-                                                [110.0, 84.0],
-                                                egui::Button::new(
-                                                    egui::RichText::new(format!(
-                                                        "{}\n{}",
-                                                        kind.icon(),
-                                                        kind.title()
-                                                    ))
-                                                    .size(15.0),
-                                                ),
-                                            )
-                                            .on_hover_text(kind.title());
-                                        if tile.clicked() {
-                                            clicked = Some(*kind);
-                                        }
-                                        if i % 3 == 2 {
-                                            ui.end_row();
-                                        }
-                                    }
-                                });
-                            ui.add_space(10.0);
-                            ui.label(
-                                egui::RichText::new("open palm to toggle · Esc to close")
-                                    .size(11.0)
-                                    .color(theme::INK_DIM),
-                            );
-                        });
-                    });
-            });
-        if let Some(kind) = clicked {
-            self.launch(kernel, kind);
-            close = true;
-        }
-        if close {
-            self.launcher_open = false;
-        }
     }
 
     fn is_open(&self, kind: AppKind) -> bool {
@@ -911,6 +811,10 @@ impl Shell {
         for i in to_close.into_iter().rev() {
             self.close(kernel, i);
         }
+        // Hand the Browser's content rect to the platform — THIS was the
+        // "browser loads nothing" bug: the local result was dropped here,
+        // so the platform-side iframe never received a URL or rect.
+        self.browser_view = browser_view;
     }
 
     /// The dock (UI spec §2.2): flat, fast access mirroring the stage icons.
@@ -925,15 +829,6 @@ impl Shell {
                     .inner_margin(egui::Margin::symmetric(14, 8))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            let launcher_btn = ui
-                                .add(
-                                    egui::Button::new(egui::RichText::new("◆").size(22.0))
-                                        .frame(false),
-                                )
-                                .on_hover_text("Launcher (open palm)");
-                            if launcher_btn.clicked() {
-                                self.launcher_open = !self.launcher_open;
-                            }
                             let palette_btn = ui
                                 .add(
                                     egui::Button::new(egui::RichText::new("✨").size(22.0))

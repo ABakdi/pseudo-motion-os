@@ -67,7 +67,6 @@ fn compact_args(args: &serde_json::Value) -> String {
 
 pub enum PaletteOutcome {
     Launch(AppKind),
-    OpenLauncher,
     /// Validated Conjure JSON ready to spawn.
     SpawnConjure(String),
     /// Send a prompt to an agent (assistant chat or App Smith repair).
@@ -433,10 +432,6 @@ impl Palette {
             }
             c.strip_prefix("the ").unwrap_or(c).trim().to_string()
         };
-        if cmd == "launcher" {
-            self.open = false;
-            return vec![PaletteOutcome::OpenLauncher];
-        }
         if cmd == "demo" || cmd == "demo app" {
             self.lines
                 .push(Line::System("✨ spawning the demo app".into()));

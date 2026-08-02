@@ -100,7 +100,7 @@ impl HandCursor {
                     }
                     HandPose::Grab => glyph(p, center, "✊", 26.0),
                     HandPose::OpenPalm => {
-                        // Palm bloom: radial pulse counting toward the launcher.
+                        // Palm bloom: radial pulse (entry pose of the RECORD sign).
                         let pulse = 12.0 + 6.0 * (t * 3.0).sin().abs();
                         p.circle_stroke(
                             center,
