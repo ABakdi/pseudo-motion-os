@@ -12,6 +12,13 @@ Entry format:
 
 ---
 
+## [2026-08-02] — M9 closes: CANCEL, object focus, second-hand editing, mouth-toggle
+### Code
+- **CANCEL sign**: ✋ pushed toward the camera — detected as rapid palm-scale growth (3 frames above 1.0×/s), no depth data needed. Closes the palette, disarms ⌘, clears object focus. Engine test included.
+- **Pinch-tap FOCUS (CSL §5)**: a quick, still 👌 tap on an object selects it — extra glow, `"focused": true` in `stage_list`, named in the AI context envelope ("make it red" now resolves). Pinch on empty stage or CANCEL clears it; removals re-index safely.
+- **Second-hand property editing**: with a focus, the non-dominant hand edits — ✌ vertical drag scales the object (collider rebuilt live, clamped 0.15–1.6), ✊ horizontal drag spins it with torque.
+- **Mouth-open voice toggle (M10)**: jawOpen held 0.6 s fires RECORD — a completely hands-free capture toggle beside double-blink click. 43 native tests.
+
 ## [2026-08-02] — M9 lands: the Voice OS is real; M10 begins: the face layer
 ### Code
 - **Continuous voice (M9.4):** the Whisper engine no longer stops at utterance end — buffers flush to the transcriber and the mic keeps rolling until the RECORD sign or the widget stops it; capture auto-starts at boot when the mic was granted at onboarding.

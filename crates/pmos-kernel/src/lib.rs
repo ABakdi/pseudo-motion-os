@@ -64,6 +64,8 @@ pub struct Kernel {
     pub face_click_pending: bool,
     /// Previous frame's two-palm spread (camera-space) for zoom deltas.
     last_palm_spread: Option<f32>,
+    /// Previous frame's second-hand pose+centroid (property-control deltas).
+    last_hand2: Option<(pmos_abi::HandPose, (f32, f32))>,
     pub ai: ai::AiState,
     pub vfs: vfs::Vfs,
     pub phys: phys::Physics,
@@ -95,6 +97,7 @@ impl Kernel {
             face: FaceState::default(),
             face_click_pending: false,
             last_palm_spread: None,
+            last_hand2: None,
             ai: ai::AiState::default(),
             vfs: vfs::Vfs::new(),
             phys: phys::Physics::new(),
@@ -144,13 +147,39 @@ impl Kernel {
         }
         self.last_palm_spread = spread;
 
+        // Non-dominant property controls (CSL spec §5): with an object
+        // FOCUSED, the second hand edits it — ✌ vertical drag scales,
+        // ✊ horizontal drag spins.
+        let hand2 = self.input.hands.hand2;
+        if let (Some(i), Some((pose2, c2))) = (self.phys.focused, hand2) {
+            if let Some((_, prev)) = self.last_hand2 {
+                let (dx, dy) = (c2.0 - prev.0, c2.1 - prev.1);
+                match pose2 {
+                    pmos_abi::HandPose::TwoFinger => {
+                        // Up (dy<0, image coords) grows the object.
+                        self.phys.scale_prop(i, 1.0 - dy * 3.0);
+                    }
+                    pmos_abi::HandPose::Grab => {
+                        self.phys
+                            .impulse_prop(i, glam::Vec3::ZERO, glam::Vec3::new(0.0, -dx * 40.0, 0.0));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.last_hand2 = hand2.map(|(p, c)| (p, c));
+
         // CSL sign recognition rides the same debounced pose stream.
         if let Some(sign) = self.input.signs.step(
             self.input.hands.pose,
             self.input.hands.cursor,
+            self.input.hands.palm_scale,
             self.input.hands.tracking,
             now,
         ) {
+            if sign == pmos_abi::CslSign::Cancel {
+                self.phys.focused = None; // CANCEL clears object focus too
+            }
             self.push_event(proc::SHELL_PID, KernelEvent::Sign { sign });
         }
         self.publish_hand_state();
@@ -181,7 +210,7 @@ impl Kernel {
                 // half-formed sign aborts too.
                 let pos = self.input.hands.cursor.unwrap_or([0.0, 0.0]);
                 self.input.fusion.lost(pos);
-                let _ = self.input.signs.step(pmos_abi::HandPose::Rest, None, false, now);
+                let _ = self.input.signs.step(pmos_abi::HandPose::Rest, None, 0.1, false, now);
             }
             self.publish_hand_state();
         }
@@ -219,6 +248,12 @@ impl Kernel {
             let (body, _) = self.phys.pick(origin, dir)?;
             self.phys.props.iter().position(|pr| pr.body == body)
         });
+    }
+
+    /// Index of the currently grabbed prop, if any (pinch-tap focus).
+    pub fn grabbed_prop_index(&self) -> Option<usize> {
+        let (body, _) = self.phys.grab_handle()?;
+        self.phys.props.iter().position(|p| p.body == body)
     }
 
     /// Try to grab a prop under the given screen position. Returns true if a
@@ -340,11 +375,30 @@ impl Kernel {
 struct FaceState {
     eyes_closed: bool,
     blink_times: Vec<f64>,
+    jaw_since: Option<f64>,
+    jaw_fired: bool,
 }
 
 impl Kernel {
-    /// Blendshape frame from the platform: [blinkL, blinkR, jawOpen, browUp].
-    pub fn face_frame(&mut self, blink_l: f32, blink_r: f32, now: f64) {
+    /// Blendshape frame from the platform: blinks + jawOpen (M10).
+    pub fn face_frame(&mut self, blink_l: f32, blink_r: f32, jaw: f32, now: f64) {
+        // Mouth held wide open ~0.6 s = hands-free voice toggle (the face
+        // layer's RECORD equivalent). Must close the mouth to re-arm.
+        if jaw > 0.55 {
+            let since = *self.face.jaw_since.get_or_insert(now);
+            if now - since > 0.6 && !self.face.jaw_fired {
+                self.face.jaw_fired = true;
+                self.push_event(
+                    proc::SHELL_PID,
+                    KernelEvent::Sign {
+                        sign: pmos_abi::CslSign::Record,
+                    },
+                );
+            }
+        } else {
+            self.face.jaw_since = None;
+            self.face.jaw_fired = false;
+        }
         let closed = blink_l > 0.55 && blink_r > 0.55;
         if closed && !self.face.eyes_closed {
             self.face.blink_times.push(now);
@@ -610,6 +664,7 @@ impl KernelApi for Kernel {
                             "size": half,
                             "color": color,
                             "pos": pos,
+                            "focused": self.phys.focused == Some(i),
                         })
                     })
                     .collect();

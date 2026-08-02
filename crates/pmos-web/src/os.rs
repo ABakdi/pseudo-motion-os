@@ -73,7 +73,7 @@ thread_local! {
     static VOICE_STATUS: RefCell<Vec<(bool, bool, String)>> = const { RefCell::new(Vec::new()) };
     static LLM_TIER: RefCell<Option<u8>> = const { RefCell::new(None) };
     static WEB_RESULTS: RefCell<Vec<(u32, bool, String)>> = const { RefCell::new(Vec::new()) };
-    static FACE_FRAME: RefCell<Option<(f32, f32)>> = const { RefCell::new(None) };
+    static FACE_FRAME: RefCell<Option<(f32, f32, f32)>> = const { RefCell::new(None) };
     static MIC_GRANTED: RefCell<bool> = const { RefCell::new(false) };
     static VOICE_TRANSCRIPTS: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
     static VFS_LOADED: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
@@ -188,10 +188,10 @@ pub fn pmos_web_result(id: u32, ok: bool, body: String) {
 }
 
 /// Called by gesture.js with face blendshape scores (M10, opt-in):
-/// eyeBlinkLeft, eyeBlinkRight. Landmarks/blendshapes only — never pixels.
+/// eyeBlinkLeft, eyeBlinkRight, jawOpen. Blendshapes only — never pixels.
 #[wasm_bindgen]
-pub fn pmos_face_frame(blink_l: f32, blink_r: f32) {
-    FACE_FRAME.with(|f| *f.borrow_mut() = Some((blink_l, blink_r)));
+pub fn pmos_face_frame(blink_l: f32, blink_r: f32, jaw: f32) {
+    FACE_FRAME.with(|f| *f.borrow_mut() = Some((blink_l, blink_r, jaw)));
 }
 
 /// Preview pixels for the Hand Tracker viewer (RGBA, mirrored). These go
@@ -411,6 +411,9 @@ struct OsApp {
     last_mouse_move: f64,
     /// 👌 pinch routing: Ui click/drag, or Prop (object grabbed by pinch).
     pinch_mode: GrabMode,
+    /// (press time, press pos, grabbed prop index) — a quick, still pinch on
+    /// an object is a SELECT: it becomes the focused object (CSL §5).
+    pinch_press: Option<(f64, [f32; 2], Option<usize>)>,
     /// One-shot: auto-start voice capture once the shell exists.
     voice_autostarted: bool,
     /// Last hand cursor position forwarded to egui (sub-point jitter from a
@@ -471,6 +474,7 @@ impl OsApp {
             shift_down: false,
             last_mouse_move: -10.0,
             pinch_mode: GrabMode::None,
+            pinch_press: None,
             voice_autostarted: false,
             last_hand_move: None,
         }
@@ -579,8 +583,8 @@ impl OsApp {
         }
         // Face layer (M10, opt-in): blendshapes → kernel; double-blink
         // injects a click at the current pointer (accessibility).
-        if let Some((bl, br)) = FACE_FRAME.with(|f| f.borrow_mut().take()) {
-            self.kernel.face_frame(bl, br, now);
+        if let Some((bl, br, jaw)) = FACE_FRAME.with(|f| f.borrow_mut().take()) {
+            self.kernel.face_frame(bl, br, jaw, now);
         }
         // Machine-probed LLM tier: surface via /sys/llm_tier, and — when the
         // user never saved an AI config — fit the default model to the tier.
@@ -752,7 +756,13 @@ impl OsApp {
                         .is_some_and(is_ui_layer);
                     if !secondary && !on_ui && self.kernel.try_grab_prop(pos, viewport) {
                         self.pinch_mode = GrabMode::Prop;
+                        self.pinch_press =
+                            Some((now_secs(), pos, self.kernel.grabbed_prop_index()));
                     } else {
+                        if !on_ui {
+                            // Pinch on empty stage clears object focus.
+                            self.kernel.phys.focused = None;
+                        }
                         self.pinch_mode = GrabMode::Ui;
                         ev.push(egui::Event::PointerMoved(p(pos)));
                         ev.push(egui::Event::PointerButton {
@@ -770,6 +780,14 @@ impl OsApp {
                 HandIntent::Release { pos, secondary } => {
                     if self.pinch_mode == GrabMode::Prop {
                         self.kernel.release_grab(); // velocity carries: throw
+                        // Quick + still = SELECT: focus the object.
+                        if let Some((t0, p0, idx)) = self.pinch_press.take() {
+                            let moved =
+                                (pos[0] - p0[0]).abs() + (pos[1] - p0[1]).abs();
+                            if now_secs() - t0 < 0.35 && moved < 18.0 {
+                                self.kernel.phys.focused = idx;
+                            }
+                        }
                     } else {
                         ev.push(egui::Event::PointerMoved(p(pos)));
                         ev.push(egui::Event::PointerButton {

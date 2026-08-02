@@ -190,7 +190,7 @@ impl Shell {
                 }
                 self.toast(
                     format!(
-                        "{} dropped — grab it with ✊ or the mouse",
+                        "{} dropped — pinch 👌 or click-drag to grab it",
                         if shape == 0 { "🧊 cube" } else { "🔮 sphere" }
                     ),
                     now,
@@ -227,8 +227,22 @@ impl Shell {
         let stage = match kernel.syscall(self.pid, Syscall::StageList) {
             Ok(Reply::Bytes(b)) => serde_json::from_slice::<serde_json::Value>(&b)
                 .ok()
-                .and_then(|v| v.as_array().map(|a| a.len()))
-                .map(|n| format!("{n} objects"))
+                .and_then(|v| {
+                    v.as_array().map(|a| {
+                        let focused = a
+                            .iter()
+                            .find(|o| o["focused"].as_bool() == Some(true))
+                            .map(|o| {
+                                format!(
+                                    " · focused: {} #{}",
+                                    o["shape"].as_str().unwrap_or("object"),
+                                    o["index"]
+                                )
+                            })
+                            .unwrap_or_default();
+                        format!("{} objects{focused}", a.len())
+                    })
+                })
                 .unwrap_or_else(|| "unknown".into()),
             _ => "unavailable".into(),
         };
@@ -623,6 +637,13 @@ impl Shell {
                                 kernel.syscall(self.pid, Syscall::VoiceCapture { start: true });
                             self.toast("● voice capture on — hold ✋ still to stop".into(), now);
                         }
+                    }
+                    pmos_abi::CslSign::Cancel => {
+                        // ✋ push: Esc-equivalent — close the palette, clear
+                        // command arming. (The kernel already cleared focus.)
+                        self.palette.open = false;
+                        self.voicekit.command_armed = false;
+                        self.toast("✕ cancelled".into(), now);
                     }
                     pmos_abi::CslSign::Command => {
                         // ☝ held still while capturing: arm command mode.

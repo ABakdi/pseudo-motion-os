@@ -136,6 +136,13 @@ pub struct HandsState {
     /// Camera-space distance between two OPEN palms (both hands tracked,
     /// both OpenPalm) — drives two-palm camera zoom (CSL spec §5).
     pub palm_spread: Option<f32>,
+    /// Primary-hand palm scale (wrist↔middle-MCP, camera space) — its
+    /// velocity is the PUSH primitive (CANCEL sign): a palm shoved toward
+    /// the camera grows fast.
+    pub palm_scale: f32,
+    /// Second hand, when present: (raw pose, camera-space palm centroid).
+    /// Drives the non-dominant property controls (CSL spec §5).
+    pub hand2: Option<(HandPose, (f32, f32))>,
     pinch_latched: bool,
     candidate: HandPose,
     candidate_frames: u8,
@@ -160,6 +167,8 @@ impl HandsState {
             hands: 0,
             camera_enabled: false,
             palm_spread: None,
+            palm_scale: 0.1,
+            hand2: None,
             pinch_latched: false,
             candidate: HandPose::Rest,
             candidate_frames: 0,
@@ -215,6 +224,7 @@ impl HandsState {
 
         // Pinch progress with hysteresis (drives the tightening ring).
         let scale = dist(pt(lm, WRIST), pt(lm, MIDDLE_MCP)).max(1e-3);
+        self.palm_scale = scale;
         let pinch_d = dist(pt(lm, THUMB_TIP), pt(lm, INDEX_TIP)) / scale;
         self.pinch_latched = if self.pinch_latched {
             pinch_d < self.pinch_exit
@@ -224,6 +234,17 @@ impl HandsState {
         self.pinch = ((self.pinch_exit * 1.6 - pinch_d)
             / (self.pinch_exit * 1.6 - self.pinch_enter))
             .clamp(0.0, 1.0);
+
+        // Second hand (CSL §5): pose + centroid for property controls.
+        self.hand2 = None;
+        if hands >= 2 && data.len() >= 126 {
+            let lm2 = &data[63..126];
+            let ids = [WRIST, 5, 9, 13, 17];
+            let (sx, sy) = ids
+                .iter()
+                .fold((0.0, 0.0), |a, &i| (a.0 + pt(lm2, i).0, a.1 + pt(lm2, i).1));
+            self.hand2 = Some((classify(lm2, self.pinch_enter), (sx / 5.0, sy / 5.0)));
+        }
 
         // Two-palm spread (CSL §5): both hands present and open.
         self.palm_spread = None;

@@ -23,6 +23,10 @@ const REFRACTORY_SECS: f64 = 1.0;
 /// COMMAND: ☝ Point held still this long marks the next utterance (spec §4).
 /// (Chin-anchored once the face mesh provides the location parameter.)
 const POINT_HOLD_SECS: f64 = 0.8;
+/// CANCEL (✋ PUSH toward the camera): the palm grows this fast (relative
+/// scale per second) for a few consecutive frames.
+const PUSH_RATE: f32 = 1.0;
+const PUSH_FRAMES: u8 = 3;
 
 #[derive(Default)]
 pub struct SignEngine {
@@ -37,6 +41,9 @@ pub struct SignEngine {
     point_since: Option<f64>,
     point_anchor: Option<[f32; 2]>,
     point_fired: bool,
+    // CANCEL (✋ push): palm-scale velocity tracking.
+    prev_scale: Option<(f64, f32)>,
+    push_frames: u8,
 }
 
 impl SignEngine {
@@ -60,9 +67,32 @@ impl SignEngine {
         &mut self,
         pose: HandPose,
         pos: Option<[f32; 2]>,
+        scale: f32,
         tracking: bool,
         now: f64,
     ) -> Option<CslSign> {
+        // CANCEL: an open palm shoved toward the camera grows fast in frame.
+        if tracking && pose == HandPose::OpenPalm && now >= self.refractory_until {
+            if let Some((pt_, ps)) = self.prev_scale {
+                let dt = (now - pt_).max(1e-3) as f32;
+                let rate = (scale / ps.max(1e-4) - 1.0) / dt;
+                if rate > PUSH_RATE {
+                    self.push_frames += 1;
+                    if self.push_frames >= PUSH_FRAMES {
+                        self.push_frames = 0;
+                        self.prev_scale = Some((now, scale));
+                        self.reset();
+                        self.refractory_until = now + REFRACTORY_SECS;
+                        return Some(CslSign::Cancel);
+                    }
+                } else {
+                    self.push_frames = 0;
+                }
+            }
+        } else {
+            self.push_frames = 0;
+        }
+        self.prev_scale = Some((now, scale));
         if !tracking {
             self.reset();
             self.reset_point();
@@ -146,7 +176,7 @@ mod tests {
     ) -> Option<CslSign> {
         let mut t = from;
         while t <= to {
-            if let Some(s) = e.step(pose, Some(pos), true, t) {
+            if let Some(s) = e.step(pose, Some(pos), 0.1, true, t) {
                 return Some(s);
             }
             t += 1.0 / 30.0;
@@ -212,10 +242,33 @@ mod tests {
     }
 
     #[test]
+    fn palm_push_fires_cancel() {
+        let mut e = SignEngine::new();
+        // Steady palm at scale 0.1…
+        let mut t = 0.0;
+        while t < 0.3 {
+            assert_eq!(e.step(HandPose::OpenPalm, Some([100.0, 100.0]), 0.1, true, t), None);
+            t += 1.0 / 30.0;
+        }
+        // …then a shove: scale grows ~8%/frame (≈2.4×/s at 30 fps).
+        let mut scale = 0.1;
+        let mut fired = None;
+        for _ in 0..6 {
+            scale *= 1.08;
+            if let Some(s) = e.step(HandPose::OpenPalm, Some([100.0, 100.0]), scale, true, t) {
+                fired = Some(s);
+                break;
+            }
+            t += 1.0 / 30.0;
+        }
+        assert_eq!(fired, Some(CslSign::Cancel));
+    }
+
+    #[test]
     fn tracking_loss_aborts() {
         let mut e = SignEngine::new();
         assert_eq!(feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 0.0, 0.8), None);
-        assert_eq!(e.step(HandPose::OpenPalm, None, false, 0.85), None);
+        assert_eq!(e.step(HandPose::OpenPalm, None, 0.1, false, 0.85), None);
         assert_eq!(feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 0.9, 1.5), None);
         assert_eq!(
             feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 1.5, 2.1),

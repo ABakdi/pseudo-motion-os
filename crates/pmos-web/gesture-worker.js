@@ -160,6 +160,7 @@ onmessage = async (e) => {
           type: "face",
           blinkL: get("eyeBlinkLeft"),
           blinkR: get("eyeBlinkRight"),
+          jaw: get("jawOpen"),
         });
       }
     }

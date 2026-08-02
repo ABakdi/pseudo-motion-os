@@ -35,6 +35,9 @@ pub struct Physics {
     grabbed: Option<(RigidBodyHandle, f32)>,
     /// Prop index under the pointer this frame (hover glow).
     pub hovered: Option<usize>,
+    /// The FOCUSED object (pinch-tap select, CSL spec §5): outlined, named
+    /// in the AI context, target of the non-dominant property controls.
+    pub focused: Option<usize>,
 }
 
 impl Physics {
@@ -72,6 +75,7 @@ impl Physics {
             props: Vec::new(),
             grabbed: None,
             hovered: None,
+            focused: None,
         }
     }
 
@@ -152,6 +156,10 @@ impl Physics {
         self.grabbed.map(|(_, d)| d)
     }
 
+    pub fn grab_handle(&self) -> Option<(RigidBodyHandle, f32)> {
+        self.grabbed
+    }
+
     /// Pull the grabbed body toward `target` with a critically-damped spring
     /// (spec §3.4: kinematic spring attach, collisions still resolve).
     pub fn grab_move(&mut self, target: Vec3) {
@@ -180,6 +188,16 @@ impl Physics {
         if self.grabbed.map(|(h, _)| h) == Some(prop.body) {
             self.grabbed = None;
         }
+        match self.focused {
+            Some(f) if f == index => self.focused = None,
+            Some(f) if f > index => self.focused = Some(f - 1),
+            _ => {}
+        }
+        match self.hovered {
+            Some(h) if h == index => self.hovered = None,
+            Some(h) if h > index => self.hovered = Some(h - 1),
+            _ => {}
+        }
         self.bodies.remove(
             prop.body,
             &mut self.islands,
@@ -189,6 +207,44 @@ impl Physics {
             true,
         );
         true
+    }
+
+    /// Resize a prop (non-dominant ✌ drag on the focused object): rebuilds
+    /// its collider at the new half-extent.
+    pub fn scale_prop(&mut self, index: usize, factor: f32) {
+        let Some(prop) = self.props.get_mut(index) else {
+            return;
+        };
+        let new_half = (prop.half * factor).clamp(0.15, 1.6);
+        if (new_half - prop.half).abs() < 1e-4 {
+            return;
+        }
+        prop.half = new_half;
+        let shape = prop.shape;
+        let body = prop.body;
+        // Replace the collider: remove attached ones, insert fresh.
+        let attached: Vec<_> = self
+            .bodies
+            .get(body)
+            .map(|b| b.colliders().to_vec())
+            .unwrap_or_default();
+        for c in attached {
+            self.colliders
+                .remove(c, &mut self.islands, &mut self.bodies, false);
+        }
+        let collider = if shape == 0 {
+            ColliderBuilder::cuboid(new_half, new_half, new_half)
+        } else {
+            ColliderBuilder::ball(new_half)
+        }
+        .restitution(0.4)
+        .friction(0.8)
+        .build();
+        self.colliders
+            .insert_with_parent(collider, body, &mut self.bodies);
+        if let Some(b) = self.bodies.get_mut(body) {
+            b.wake_up(true);
+        }
     }
 
     pub fn clear_props(&mut self) {
@@ -231,13 +287,16 @@ impl Physics {
                 let r = body.rotation();
                 // First-class objects (UI spec §3.4): the one under the
                 // pointer — or in the grip — glows brighter.
+                let focused = self.focused == Some(i);
                 let lit = self.hovered == Some(i)
+                    || focused
                     || self.grabbed.map(|(h, _)| h) == Some(p.body);
+                let boost = if focused { 1.9 } else { 1.5 };
                 let color = if lit {
                     [
-                        (p.color[0] * 1.5 + 0.15).min(1.0),
-                        (p.color[1] * 1.5 + 0.15).min(1.0),
-                        (p.color[2] * 1.5 + 0.15).min(1.0),
+                        (p.color[0] * boost + 0.18).min(1.0),
+                        (p.color[1] * boost + 0.18).min(1.0),
+                        (p.color[2] * boost + 0.18).min(1.0),
                     ]
                 } else {
                     p.color
