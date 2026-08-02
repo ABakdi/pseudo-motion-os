@@ -522,16 +522,16 @@ impl Shell {
                 }
                 KernelEvent::Sign { sign } => match sign {
                     pmos_abi::CslSign::Record => {
-                        // ✋→✊ squeeze: toggle voice capture (CSL spec §4).
+                        // ✋ still hold: toggle voice capture (CSL spec §4).
                         if self.voice_listening {
                             let _ =
                                 kernel.syscall(self.pid, Syscall::VoiceCapture { start: false });
-                            self.toast("⏸ voice stopped (✋→✊ to start again)".into(), now);
+                            self.toast("⏸ voice stopped (hold ✋ still to restart)".into(), now);
                         } else {
                             self.palette.start_voice();
                             let _ =
                                 kernel.syscall(self.pid, Syscall::VoiceCapture { start: true });
-                            self.toast("● listening — ✋→✊ again to stop".into(), now);
+                            self.toast("● listening — hold ✋ still to stop".into(), now);
                         }
                     }
                     _ => {}
@@ -666,6 +666,7 @@ impl Shell {
         egui::Area::new(egui::Id::new("toasts"))
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-14.0, -70.0))
             .order(egui::Order::Foreground)
+            .interactable(false) // display-only, never block stage input
             .show(ctx, |ui| {
                 for (text, _) in self.toasts.iter().rev().take(4) {
                     egui::Frame::window(ui.style())
@@ -885,6 +886,10 @@ impl Shell {
         egui::Area::new(egui::Id::new("cam-hint"))
             .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 10.0))
             .order(egui::Order::Background)
+            // Display-only: MUST stay out of pointer hit-tests — this layer's
+            // stored rect once swallowed stage clicks ("backg" in the logs)
+            // and killed orbit/grab/zoom routing (user-reported).
+            .interactable(false)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.weak(self.cursor.tray_text());

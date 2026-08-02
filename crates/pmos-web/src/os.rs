@@ -44,6 +44,13 @@ pub fn pmos_launch(permissions_json: String) {
     event_loop.spawn_app(OsApp::new());
 }
 
+
+/// Is this egui layer real UI (something a pointer should defer to)?
+/// Background-order layers are backdrops/hints in PMOS — never UI.
+fn is_ui_layer(l: egui::LayerId) -> bool {
+    l.order != egui::Order::Background
+}
+
 fn now_secs() -> f64 {
     web_sys::window().unwrap().performance().unwrap().now() / 1000.0
 }
@@ -448,6 +455,25 @@ impl OsApp {
         }
         self.kernel.tick_hands(now);
 
+        // Hover pick (first-class objects): whichever pointer is live — the
+        // hand while tracking, else the mouse — lights up the prop under it,
+        // unless it's over UI.
+        {
+            let ppp = self.egui_ctx.pixels_per_point();
+            let pointer = if self.kernel.input.hands.tracking {
+                self.kernel.input.hands.cursor
+            } else {
+                self.last_cursor.map(|(x, y)| [x / ppp, y / ppp])
+            };
+            let pointer = pointer.filter(|p| {
+                !self
+                    .egui_ctx
+                    .layer_id_at(egui::pos2(p[0], p[1]))
+                    .is_some_and(is_ui_layer)
+            });
+            self.kernel.update_hover(pointer, viewport);
+        }
+
         // Voice plumbing: engine status + transcripts in, capture intent out.
         // Transcripts BEFORE statuses: the engine emits the final transcript
         // then the session-end status, and the shell must see them in order.
@@ -611,10 +637,10 @@ impl OsApp {
                     });
                 }
                 HandIntent::Scroll { pos, dy }
-                    if self
+                    if !self
                         .egui_ctx
                         .layer_id_at(egui::pos2(pos[0], pos[1]))
-                        .is_none() =>
+                        .is_some_and(is_ui_layer) =>
                 {
                     // ✌ over the empty stage zooms the camera; over UI it
                     // scrolls (modality parity with the mouse wheel).
@@ -634,7 +660,7 @@ impl OsApp {
                 }
                 HandIntent::GrabStart(pos) => {
                     // Decide once per grab: UI drag, physics prop, or orbit.
-                    if self.egui_ctx.layer_id_at(p(pos)).is_some() {
+                    if self.egui_ctx.layer_id_at(p(pos)).is_some_and(is_ui_layer) {
                         self.hand_grab_mode = GrabMode::Ui;
                         ev.push(egui::Event::PointerMoved(p(pos)));
                         ev.push(egui::Event::PointerButton {
@@ -807,7 +833,7 @@ impl ApplicationHandler for OsApp {
                 let on_ui = self
                     .egui_ctx
                     .layer_id_at(egui::pos2(pos_pts[0], pos_pts[1]))
-                    .is_some();
+                    .is_some_and(is_ui_layer);
                 if state == ElementState::Pressed && !on_ui {
                     let t = now_secs();
                     if t - self.last_press < 0.35 {
@@ -825,10 +851,16 @@ impl ApplicationHandler for OsApp {
                     } else {
                         GrabMode::Orbit
                     };
-                    log::debug!(
+                    log::info!(
                         "mouse press at {pos_pts:?} vp {viewport:?} → {:?}",
                         self.mouse_mode
                     );
+                } else if state == ElementState::Pressed {
+                    let layer = self
+                        .egui_ctx
+                        .layer_id_at(egui::pos2(pos_pts[0], pos_pts[1]))
+                        .map(|l| l.short_debug_format());
+                    log::info!("mouse press at {pos_pts:?} on UI layer {layer:?}");
                 } else if state == ElementState::Released {
                     if self.mouse_mode == GrabMode::Prop {
                         self.kernel.release_grab();
@@ -848,7 +880,7 @@ impl ApplicationHandler for OsApp {
                         let ppp = self.egui_ctx.pixels_per_point();
                         self.egui_ctx
                             .layer_id_at(egui::pos2(x / ppp, y / ppp))
-                            .is_some()
+                            .is_some_and(is_ui_layer)
                     })
                     .unwrap_or(false);
                 self.mouse_mode = if state == ElementState::Pressed && !on_ui {
@@ -898,9 +930,10 @@ impl ApplicationHandler for OsApp {
                         let ppp = self.egui_ctx.pixels_per_point();
                         self.egui_ctx
                             .layer_id_at(egui::pos2(x / ppp, y / ppp))
-                            .is_some()
+                            .is_some_and(is_ui_layer)
                     })
                     .unwrap_or(false);
+                log::info!("wheel: on_ui={on_ui} cursor={:?}", self.last_cursor);
                 if !on_ui {
                     let dy = match delta {
                         MouseScrollDelta::LineDelta(_, y) => y,

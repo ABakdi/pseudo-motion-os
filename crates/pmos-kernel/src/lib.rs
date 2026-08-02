@@ -123,6 +123,7 @@ impl Kernel {
         // CSL sign recognition rides the same debounced pose stream.
         if let Some(sign) = self.input.signs.step(
             self.input.hands.pose,
+            self.input.hands.cursor,
             self.input.hands.tracking,
             now,
         ) {
@@ -152,9 +153,11 @@ impl Kernel {
         self.input.hands.tick(now);
         if was_tracking != self.input.hands.tracking {
             if !self.input.hands.tracking {
-                // Release anything the hand was holding (spec §7).
+                // Release anything the hand was holding (spec §7); a
+                // half-formed sign aborts too.
                 let pos = self.input.hands.cursor.unwrap_or([0.0, 0.0]);
                 self.input.fusion.lost(pos);
+                let _ = self.input.signs.step(pmos_abi::HandPose::Rest, None, false, now);
             }
             self.publish_hand_state();
         }
@@ -180,6 +183,18 @@ impl Kernel {
                 &instances,
             );
         }
+    }
+
+    /// Per-frame hover pick: which prop sits under the pointer (mouse or
+    /// hand)? Drives the hover glow — objects respond before any click
+    /// (first-class citizens, user request 2026-08-02).
+    pub fn update_hover(&mut self, pos: Option<[f32; 2]>, viewport: [f32; 2]) {
+        self.phys.hovered = pos.and_then(|p| {
+            let gfx = self.gfx.as_ref()?;
+            let (origin, dir) = gfx.screen_ray(p, viewport);
+            let (body, _) = self.phys.pick(origin, dir)?;
+            self.phys.props.iter().position(|pr| pr.body == body)
+        });
     }
 
     /// Try to grab a prop under the given screen position. Returns true if a

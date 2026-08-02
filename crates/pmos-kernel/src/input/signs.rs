@@ -1,28 +1,34 @@
 //! The CSL sign engine (Computer Sign Language spec §3–§4): per-sign state
-//! machines over the debounced pose stream. v1 implements RECORD — the
-//! ✋→✊ "squeeze" that toggles Voice Kit capture. COMMAND and CANCEL land
-//! with their milestones (COMMAND needs the command stream, CANCEL needs
-//! palm-z velocity).
+//! machines over the debounced pose stream. v1 implements RECORD.
 //!
-//! Midas-touch guards (spec §3): a sign needs its entry pose HELD (not just
-//! classified for a frame), transitions have tight time windows, a fired
-//! sign has a refractory period, and tracking loss aborts silently.
+//! RECORD is a still ✋ open-palm HOLD (1.0 s) — "raise your hand to speak".
+//! The original ✋→✊ squeeze collided head-on with ✊ = grab (user-reported:
+//! opening the hand before grabbing kept toggling voice), so the fist now
+//! belongs exclusively to grabbing and RECORD lives on the palm alone.
+//!
+//! Midas-touch guards (spec §3): the palm must be held AND still (drift
+//! aborts — a palm waving mid-conversation is gesticulation, not a sign),
+//! a fired sign has a refractory period and must be released (pose must
+//! leave OpenPalm) before it can re-arm, and tracking loss aborts silently.
 
 use pmos_abi::{CslSign, HandPose};
 
-/// Entry pose must be held at least this long (spec §3 guard).
-const PALM_HOLD_SECS: f64 = 0.3;
-/// The fist must land within this long of the palm breaking.
-const SQUEEZE_WINDOW_SECS: f64 = 0.8;
+/// The palm must be held this long to fire RECORD.
+const PALM_HOLD_SECS: f64 = 1.0;
+/// Cursor drift beyond this (egui points) re-arms the hold — moving palms
+/// are pointing/gesticulating, not signing.
+const MAX_DRIFT_PT: f32 = 70.0;
 /// No sign can fire again within this window of a completed one.
-const REFRACTORY_SECS: f64 = 0.5;
+const REFRACTORY_SECS: f64 = 1.0;
 
 #[derive(Default)]
 pub struct SignEngine {
-    /// When the open palm began (None = not in a RECORD attempt).
+    /// When the still palm hold began (None = not armed).
     palm_since: Option<f64>,
-    /// When the palm broke after a long-enough hold (squeeze in flight).
-    palm_left_at: Option<f64>,
+    /// Cursor position at arm time (drift reference).
+    anchor: Option<[f32; 2]>,
+    /// Set after firing; the palm must drop before RECORD can re-arm.
+    fired: bool,
     refractory_until: f64,
 }
 
@@ -33,49 +39,50 @@ impl SignEngine {
 
     fn reset(&mut self) {
         self.palm_since = None;
-        self.palm_left_at = None;
+        self.anchor = None;
     }
 
-    /// Feed one debounced pose frame; returns a completed sign at most once
-    /// per gesture.
-    pub fn step(&mut self, pose: HandPose, tracking: bool, now: f64) -> Option<CslSign> {
-        if !tracking || now < self.refractory_until {
+    /// Feed one debounced pose frame (with the stabilized cursor position);
+    /// returns a completed sign at most once per gesture.
+    pub fn step(
+        &mut self,
+        pose: HandPose,
+        pos: Option<[f32; 2]>,
+        tracking: bool,
+        now: f64,
+    ) -> Option<CslSign> {
+        if !tracking {
             self.reset();
+            self.fired = false;
             return None;
         }
-        match pose {
-            HandPose::OpenPalm => {
-                // (Re)arm: an open palm always restarts the hold timer chain.
-                if self.palm_left_at.is_some() {
-                    self.reset();
-                }
-                self.palm_since.get_or_insert(now);
+        if pose != HandPose::OpenPalm {
+            // Palm dropped: release the fired latch, abort any partial hold.
+            self.reset();
+            self.fired = false;
+            return None;
+        }
+        if self.fired || now < self.refractory_until {
+            return None;
+        }
+        // Drift check: a moving palm is not a sign.
+        if let (Some(anchor), Some(p)) = (self.anchor, pos) {
+            let drift = (p[0] - anchor[0]).abs() + (p[1] - anchor[1]).abs();
+            if drift > MAX_DRIFT_PT {
+                self.palm_since = Some(now);
+                self.anchor = pos;
+                return None;
             }
-            HandPose::Grab => {
-                if let Some(since) = self.palm_since {
-                    let left = self.palm_left_at.unwrap_or(now);
-                    let held = left - since;
-                    let gap = now - left;
-                    self.reset();
-                    if held >= PALM_HOLD_SECS && gap <= SQUEEZE_WINDOW_SECS {
-                        self.refractory_until = now + REFRACTORY_SECS;
-                        return Some(CslSign::Record);
-                    }
-                }
-            }
-            // The pose stream often passes through Rest mid-squeeze (fingers
-            // half-curled classify as neither palm nor fist). Tolerate it
-            // inside the squeeze window; expire stale attempts.
-            HandPose::Rest => {
-                if let Some(since) = self.palm_since {
-                    let left = *self.palm_left_at.get_or_insert(now);
-                    if left - since < PALM_HOLD_SECS || now - left > SQUEEZE_WINDOW_SECS {
-                        self.reset();
-                    }
-                }
-            }
-            // Any other deliberate pose is a different intent — abort.
-            _ => self.reset(),
+        }
+        let since = *self.palm_since.get_or_insert(now);
+        if self.anchor.is_none() {
+            self.anchor = pos;
+        }
+        if now - since >= PALM_HOLD_SECS {
+            self.reset();
+            self.fired = true;
+            self.refractory_until = now + REFRACTORY_SECS;
+            return Some(CslSign::Record);
         }
         None
     }
@@ -85,10 +92,16 @@ impl SignEngine {
 mod tests {
     use super::*;
 
-    fn feed(e: &mut SignEngine, pose: HandPose, from: f64, to: f64) -> Option<CslSign> {
+    fn feed(
+        e: &mut SignEngine,
+        pose: HandPose,
+        pos: [f32; 2],
+        from: f64,
+        to: f64,
+    ) -> Option<CslSign> {
         let mut t = from;
         while t <= to {
-            if let Some(s) = e.step(pose, true, t) {
+            if let Some(s) = e.step(pose, Some(pos), true, t) {
                 return Some(s);
             }
             t += 1.0 / 30.0;
@@ -97,53 +110,60 @@ mod tests {
     }
 
     #[test]
-    fn squeeze_fires_record() {
+    fn still_palm_hold_fires_record() {
         let mut e = SignEngine::new();
-        assert_eq!(feed(&mut e, HandPose::OpenPalm, 0.0, 0.5), None);
-        assert_eq!(feed(&mut e, HandPose::Rest, 0.53, 0.6), None);
         assert_eq!(
-            feed(&mut e, HandPose::Grab, 0.63, 0.7),
+            feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 0.0, 1.2),
             Some(CslSign::Record)
         );
     }
 
     #[test]
-    fn short_palm_does_not_fire() {
+    fn short_or_moving_palm_does_not_fire() {
         let mut e = SignEngine::new();
-        assert_eq!(feed(&mut e, HandPose::OpenPalm, 0.0, 0.1), None);
-        assert_eq!(feed(&mut e, HandPose::Grab, 0.15, 0.4), None);
-    }
-
-    #[test]
-    fn slow_squeeze_expires() {
-        let mut e = SignEngine::new();
-        assert_eq!(feed(&mut e, HandPose::OpenPalm, 0.0, 0.5), None);
-        assert_eq!(feed(&mut e, HandPose::Rest, 0.55, 1.6), None); // > window
-        assert_eq!(feed(&mut e, HandPose::Grab, 1.65, 1.8), None);
-    }
-
-    #[test]
-    fn other_pose_aborts_and_refractory_blocks() {
-        let mut e = SignEngine::new();
-        assert_eq!(feed(&mut e, HandPose::OpenPalm, 0.0, 0.5), None);
-        assert_eq!(feed(&mut e, HandPose::Point, 0.55, 0.6), None); // abort
-        assert_eq!(feed(&mut e, HandPose::Grab, 0.65, 0.8), None);
-
-        // A clean squeeze fires, then an immediate second one is suppressed.
-        let mut e = SignEngine::new();
-        assert!(feed(&mut e, HandPose::OpenPalm, 0.0, 0.5).is_none());
+        assert_eq!(feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 0.0, 0.5), None);
+        // Big jump re-arms the hold — total time never accumulates.
+        assert_eq!(feed(&mut e, HandPose::OpenPalm, [300.0, 100.0], 0.6, 1.4), None);
         assert_eq!(
-            feed(&mut e, HandPose::Grab, 0.53, 0.6),
+            feed(&mut e, HandPose::OpenPalm, [300.0, 100.0], 1.5, 1.9),
+            Some(CslSign::Record) // still again → fires 1s after the jump
+        );
+    }
+
+    #[test]
+    fn fist_never_fires_record() {
+        // The grab pose is not part of RECORD anymore — no squeeze conflict.
+        let mut e = SignEngine::new();
+        assert_eq!(feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 0.0, 0.6), None);
+        assert_eq!(feed(&mut e, HandPose::Grab, [100.0, 100.0], 0.65, 1.8), None);
+    }
+
+    #[test]
+    fn must_release_palm_before_rearming() {
+        let mut e = SignEngine::new();
+        assert_eq!(
+            feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 0.0, 1.2),
             Some(CslSign::Record)
         );
-        assert_eq!(feed(&mut e, HandPose::OpenPalm, 0.65, 0.9), None);
+        // Palm kept raised: silent, even past the refractory window.
+        assert_eq!(feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 1.3, 4.0), None);
+        // Drop, raise again → fires again.
+        assert_eq!(feed(&mut e, HandPose::Rest, [100.0, 100.0], 4.1, 4.2), None);
+        assert_eq!(
+            feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 4.3, 5.5),
+            Some(CslSign::Record)
+        );
     }
 
     #[test]
     fn tracking_loss_aborts() {
         let mut e = SignEngine::new();
-        assert_eq!(feed(&mut e, HandPose::OpenPalm, 0.0, 0.5), None);
-        assert_eq!(e.step(HandPose::OpenPalm, false, 0.55), None); // lost
-        assert_eq!(feed(&mut e, HandPose::Grab, 0.6, 0.7), None);
+        assert_eq!(feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 0.0, 0.8), None);
+        assert_eq!(e.step(HandPose::OpenPalm, None, false, 0.85), None);
+        assert_eq!(feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 0.9, 1.5), None);
+        assert_eq!(
+            feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 1.5, 2.1),
+            Some(CslSign::Record)
+        );
     }
 }

@@ -33,6 +33,8 @@ pub struct Physics {
     accumulator: f32,
     pub props: Vec<Prop>,
     grabbed: Option<(RigidBodyHandle, f32)>,
+    /// Prop index under the pointer this frame (hover glow).
+    pub hovered: Option<usize>,
 }
 
 impl Physics {
@@ -69,6 +71,7 @@ impl Physics {
             accumulator: 0.0,
             props: Vec::new(),
             grabbed: None,
+            hovered: None,
         }
     }
 
@@ -221,16 +224,30 @@ impl Physics {
     pub fn instances(&self) -> Vec<([f32; 3], [f32; 4], u8, f32, [f32; 3])> {
         self.props
             .iter()
-            .filter_map(|p| {
+            .enumerate()
+            .filter_map(|(i, p)| {
                 let body = self.bodies.get(p.body)?;
                 let t = body.translation();
                 let r = body.rotation();
+                // First-class objects (UI spec §3.4): the one under the
+                // pointer — or in the grip — glows brighter.
+                let lit = self.hovered == Some(i)
+                    || self.grabbed.map(|(h, _)| h) == Some(p.body);
+                let color = if lit {
+                    [
+                        (p.color[0] * 1.5 + 0.15).min(1.0),
+                        (p.color[1] * 1.5 + 0.15).min(1.0),
+                        (p.color[2] * 1.5 + 0.15).min(1.0),
+                    ]
+                } else {
+                    p.color
+                };
                 Some((
                     [t.x, t.y, t.z],
                     [r.i, r.j, r.k, r.w],
                     p.shape,
                     p.half,
-                    p.color,
+                    color,
                 ))
             })
             .collect()
