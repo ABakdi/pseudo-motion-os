@@ -12,6 +12,14 @@ Entry format:
 
 ---
 
+## [2026-08-02] — Stage input round 2: the background hint layer, RECORD off the fist, hover glow
+### Code
+- **Third input blocker found** (live-debugged): the tray hint — an `Order::Background` egui Area — was returned by `layer_id_at` over a band of the screen, so stage presses there read as "on UI" and orbit/grab/zoom never engaged. The hint and toasts are now `interactable(false)`, and all stage routing treats Background-order layers as backdrops, never UI. **Wheel zoom verified working on the empty stage after the fix.**
+- **RECORD remapped (user-reported conflict):** ✋→✊ squeeze collided with ✊ = grab — every grab toggled voice. RECORD is now a **still ✋ hold (1.0 s)** — "raise your hand to speak" — with drift abort (a moving palm is gesticulation), release-before-rearm, and refractory. The fist belongs exclusively to grabbing. Specs updated; 5 sign tests rewritten.
+- **Objects are first-class (user request):** a per-frame hover pick (hand while tracking, else mouse; UI positions excluded) makes the prop under the pointer glow; the grabbed prop stays lit while held.
+### Specs
+- [[Computer Sign Language]] §4 RECORD row rewritten; [[Hand Gestures]] G5/tuning updated.
+
 ## [2026-08-02] — Stage interaction unbroken: the zero viewport and the poisoned pointer
 ### Code
 Two root causes found by live-debugging with console instrumentation (user-reported: can't grab objects, stage controls dead):

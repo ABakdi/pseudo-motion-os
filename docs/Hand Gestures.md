@@ -61,7 +61,7 @@ One-Euro smoothing (§2) remains the base layer beneath all three. Tuning: `HOLD
 | G2 | **Pinch** 👌 | thumb–index fingertips touch | Primary select / click; **pinch-hold + move = drag** | Highest-precision fingertip event a webcam can see; maps to "pick precisely". Enter < 25 mm, exit > 40 mm (hysteresis). |
 | G3 | **Middle pinch** | thumb–middle fingertips touch | Secondary click / context menu | Same motor pattern as G2, adjacent finger → trivially learnable as "the other click". |
 | G4 | **Grab** ✊ | all fingers curled to fist | Grab window / 3D object (kinematic spring attach); release = drop, release-with-motion = **throw** | Whole-hand closure for whole-object manipulation mirrors real grasping; velocity inheritance makes throwing feel free. |
-| G5 | **Open-palm** ✋ | all five extended, palm to camera | ~~Open the Launcher~~ **Launcher removed entirely (user decision 2026-08-01)** — the palm is now the entry pose of the **RECORD sign** (✋→✊ squeeze toggles Voice Kit capture, [[Computer Sign Language#4]]). Apps launch from the dock and palette. | Palm-out is a natural attention pose; "grabbing the air" to catch sound is iconic. |
+| G5 | **Open-palm** ✋ | all five extended, palm to camera | ~~Open the Launcher~~ **Launcher removed entirely (user decision 2026-08-01)** — the palm IS the **RECORD sign**: held still for 1.0 s it toggles Voice Kit capture ([[Computer Sign Language#4]]; redesigned 2026-08-02 — the earlier squeeze collided with ✊ = grab). Apps launch from the dock and palette. | Palm-out is a natural attention pose; "grabbing the air" to catch sound is iconic. |
 | G6 | **Swipe** 🖐️→ | open hand, lateral motion > 0.7 m/s | Switch virtual desktop (left/right); in scrollable context: page | Broad motion for broad navigation; the velocity floor separates it from repositioning. |
 | G7 | **Two-finger drag** ✌️+move | index+middle extended, move vertically | Over UI: scroll the focused view. **Over the empty stage: zoom the camera** *(implemented 2026-08-01 — modality parity with the mouse wheel)* | Direct steal from trackpad muscle memory. Palm-tilt scroll is an optional alt mode in settings. |
 | G8 | **Call sign** 🤙 | thumb+pinky extended, others curled | **Tap (< 0.5 s): toggle the command palette.** **Hold (≥ 0.6 s): voice command mode** — palette opens listening, the transcript streams live into the input line, end of utterance executes it *(implemented 2026-07-31)*. The dwell makes the voice trigger impossible to hit by accident. Voice **notes** (long dictation → notes inbox, [[Notes System#Voice capture]]) remain a follow-up on this same anchor. | The "call me" sign is the most iconic "talk" gesture that exists; tap-vs-hold gives palette and voice capture one memorable anchor. Topologically unique (only pose using the pinky alone with thumb). |
@@ -94,7 +94,7 @@ Never required; always a superset of a one-hand or mouse path.
 | Parameter | Default | Range |
 |---|---|---|
 | Pinch enter / exit distance | 25 mm / 40 mm | 15–60 |
-| RECORD squeeze window (✋→✊) | palm ≥ 0.3 s, fist within 0.8 s | 0.2–1.5 |
+| RECORD still-palm hold | 1.0 s, drift ≤ 70 pt | 0.6–2.0 |
 | 🤙 tap vs. hold boundary | 0.5 s / 0.6 s | fixed ratio, scalable |
 | Swipe velocity floor | 0.7 m/s | 0.4–1.2 |
 | Dwell-as-hover | 800 ms | 400–2000 |
