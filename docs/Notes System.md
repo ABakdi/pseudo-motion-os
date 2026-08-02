@@ -76,4 +76,6 @@ Typical flows: summarize a long note, "turn this voice ramble into bullet points
 
 ---
 
+> **2026-08-02 — 3D graph shipped:** the 🕸 toggle in Motion Notes renders the vault as floating physics bodies over the stage — wikilink springs, force-directed layout, clickable projected titles, grab-and-drag. (`GraphShow`/`GraphLabels`, ABI 1.12.)
+
 *Changes to this document must be recorded in [[Changelog]].*

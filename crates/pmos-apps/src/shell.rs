@@ -232,6 +232,98 @@ impl Shell {
         self.toast("🗑 removed the newest object".into(), now);
     }
 
+    /// The notes-graph 2D overlay (Notes System spec): link lines + clickable
+    /// titles projected from the 3D node positions each frame.
+    fn graph_overlay(&mut self, ctx: &egui::Context, kernel: &mut dyn KernelApi) {
+        let graph_on = self
+            .open_apps
+            .iter()
+            .any(|a| a.open && a.state.kind == AppKind::Notes && a.state.notes_graph_on);
+        if !graph_on {
+            return;
+        }
+        let screen = ctx.content_rect();
+        let Ok(Reply::Bytes(b)) = kernel.syscall(
+            self.pid,
+            Syscall::GraphLabels {
+                viewport: [screen.width(), screen.height()],
+            },
+        ) else {
+            return;
+        };
+        let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) else {
+            return;
+        };
+        let nodes: Vec<Option<(String, String, f32, f32)>> = v["nodes"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|n| {
+                        Some((
+                            n["title"].as_str()?.to_string(),
+                            n["path"].as_str()?.to_string(),
+                            n["x"].as_f64()? as f32,
+                            n["y"].as_f64()? as f32,
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut open_path: Option<String> = None;
+        egui::Area::new(egui::Id::new("notes-graph"))
+            .fixed_pos(screen.min)
+            .order(egui::Order::Middle)
+            .show(ctx, |ui| {
+                let p = ui.painter();
+                // Link lines between projected node positions.
+                for link in v["links"].as_array().into_iter().flatten() {
+                    let (Some(a), Some(bi)) = (
+                        link[0].as_u64().map(|x| x as usize),
+                        link[1].as_u64().map(|x| x as usize),
+                    ) else {
+                        continue;
+                    };
+                    if let (Some(Some(na)), Some(Some(nb))) = (nodes.get(a), nodes.get(bi)) {
+                        p.line_segment(
+                            [egui::pos2(na.2, na.3), egui::pos2(nb.2, nb.3)],
+                            egui::Stroke::new(1.0, theme::accent_a().gamma_multiply(0.35)),
+                        );
+                    }
+                }
+                // Clickable titles under each node.
+                for node in nodes.iter().flatten() {
+                    let pos = egui::pos2(node.2, node.3 + 16.0);
+                    let resp = ui.put(
+                        egui::Rect::from_center_size(pos, egui::vec2(120.0, 18.0)),
+                        egui::Button::new(
+                            egui::RichText::new(&node.0).size(11.5).color(theme::INK),
+                        )
+                        .frame(false),
+                    );
+                    if resp.clicked() {
+                        open_path = Some(node.1.clone());
+                    }
+                }
+            });
+        if let Some(path) = open_path {
+            self.launch(kernel, AppKind::Notes);
+            let pids: Vec<Pid> = self
+                .open_apps
+                .iter()
+                .filter(|a| a.state.kind == AppKind::Notes)
+                .map(|a| a.pid)
+                .collect();
+            for (app_pid, app) in pids.into_iter().zip(
+                self.open_apps
+                    .iter_mut()
+                    .filter(|a| a.state.kind == AppKind::Notes),
+            ) {
+                app.state.open_note(&path, kernel, app_pid);
+                app.focus = true;
+            }
+        }
+    }
+
     /// A compact live-context block for voice commands (Voice Kit spec §5).
     fn context_envelope(&mut self, kernel: &mut dyn KernelApi) -> String {
         let stage = match kernel.syscall(self.pid, Syscall::StageList) {
@@ -794,6 +886,7 @@ impl Shell {
         self.dock(ctx, kernel);
         let palette_outcomes = self.palette.ui(ctx);
         self.handle_outcomes(palette_outcomes, kernel, now);
+        self.graph_overlay(ctx, kernel);
         for action in self.voicekit.ui(ctx, kernel, self.pid, today) {
             match action {
                 KitAction::ToggleCapture => {

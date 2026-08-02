@@ -12,6 +12,10 @@ Entry format:
 
 ---
 
+## [2026-08-02] — The notes graph goes 3D (carried since M7)
+### Code
+- **Notes 3D graph (ABI 1.12)**: Motion Notes' 🕸 button spawns every /notes file as a gravity-free physics body floating over the stage; [[wikilinks]] become springs and a force-directed layout (springs + pairwise repulsion + a soft center anchor, applied inside the 120 Hz step) settles the cloud. `GraphLabels` projects nodes through the live camera each frame; the shell overlays link lines and clickable titles — click to open the note, pinch/click-drag a node to pull the whole graph around on its springs. Nodes are real bodies, so all camera and grab mechanics apply. `StageList` reports props only (graph nodes are notes, not stage objects).
+
 ## [2026-08-02] — Polish sweep: canvas, chin-anchored ⌘, context menus, richer context
 ### Code
 - **Conjure `canvas`** — the last v1 widget: a fixed-size surface drawn from draw-op maps (circle/rect/line/text, hex colors) with `on_pointer` handing px/py locals to a handler; validator, App Host, and the App Smith contract updated. The v1 widget catalog is complete.

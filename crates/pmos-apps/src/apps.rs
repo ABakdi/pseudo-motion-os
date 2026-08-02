@@ -153,6 +153,8 @@ pub struct AppState {
     // voice (Settings → Voice)
     voice_model: String,
     voice_loaded: bool,
+    /// Notes graph view toggled on (stage bodies live while true).
+    pub notes_graph_on: bool,
     // face (Settings → Face, M10 opt-in)
     face_enabled: bool,
     face_loaded: bool,
@@ -201,6 +203,7 @@ impl AppState {
             llm_tier: None,
             voice_model: "tiny".to_string(),
             voice_loaded: false,
+            notes_graph_on: false,
             face_enabled: false,
             face_loaded: false,
             stage_az: 215.0,
@@ -942,7 +945,7 @@ impl AppState {
             .to_string()
     }
 
-    fn open_note(&mut self, path: &str, kernel: &mut dyn KernelApi, pid: Pid) {
+    pub fn open_note(&mut self, path: &str, kernel: &mut dyn KernelApi, pid: Pid) {
         match kernel.syscall(
             pid,
             Syscall::FsRead {
@@ -1026,6 +1029,19 @@ impl AppState {
                             .hint_text("new note")
                             .desired_width(110.0),
                     );
+                    if ui
+                        .button("🕸")
+                        .on_hover_text("toggle the 3D graph view on the stage")
+                        .clicked()
+                    {
+                        self.notes_graph_on = !self.notes_graph_on;
+                        let _ = kernel.syscall(
+                            pid,
+                            Syscall::GraphShow {
+                                show: self.notes_graph_on,
+                            },
+                        );
+                    }
                     if ui.button("＋").clicked() && !self.notes_new_name.trim().is_empty() {
                         let path =
                             format!("/notes/{}.md", self.notes_new_name.trim().replace(' ', "-"));

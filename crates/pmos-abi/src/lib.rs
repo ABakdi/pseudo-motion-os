@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 11);
+pub const ABI_VERSION: (u16, u16) = (1, 12);
 
 // ---------- handles ----------
 
@@ -196,6 +196,18 @@ pub enum Syscall {
     /// `WebResult` event. Requires `NetLlm`.
     WebFetch {
         url: String,
+    },
+    /// Show/hide the notes graph on the stage (ABI 1.12): every /notes
+    /// markdown file becomes a floating body, every [[wikilink]] a spring.
+    /// Requires `NotesRead`.
+    GraphShow {
+        show: bool,
+    },
+    /// Project the graph for the 2D overlay (ABI 1.12). Replies
+    /// `Bytes(JSON { nodes: [{title,path,x,y,depth}], links: [[a,b]] })`
+    /// with x/y in points for the given viewport; off-screen nodes omitted.
+    GraphLabels {
+        viewport: [f32; 2],
     },
 }
 

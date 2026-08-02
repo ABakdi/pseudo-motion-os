@@ -18,6 +18,13 @@ pub struct Prop {
     pub color: [f32; 3],
 }
 
+/// A note floating in the graph view (Notes System spec: notes-as-bodies).
+pub struct NoteNode {
+    pub body: RigidBodyHandle,
+    pub title: String,
+    pub path: String,
+}
+
 pub struct Physics {
     pipeline: PhysicsPipeline,
     islands: IslandManager,
@@ -38,6 +45,9 @@ pub struct Physics {
     /// The FOCUSED object (pinch-tap select, CSL spec §5): outlined, named
     /// in the AI context, target of the non-dominant property controls.
     pub focused: Option<usize>,
+    /// Notes-graph nodes (gravity-free bodies) + wikilink springs.
+    pub notes: Vec<NoteNode>,
+    pub note_links: Vec<(usize, usize)>,
 }
 
 impl Physics {
@@ -76,6 +86,8 @@ impl Physics {
             grabbed: None,
             hovered: None,
             focused: None,
+            notes: Vec::new(),
+            note_links: Vec::new(),
         }
     }
 
@@ -106,11 +118,102 @@ impl Physics {
         });
     }
 
+    /// Spawn one graph node: a gravity-free, heavily damped ball.
+    pub fn spawn_note(&mut self, pos: Vec3, title: String, path: String) {
+        let body = self.bodies.insert(
+            RigidBodyBuilder::dynamic()
+                .translation(vector![pos.x, pos.y, pos.z])
+                .gravity_scale(0.0)
+                .linear_damping(2.5)
+                .angular_damping(4.0)
+                .build(),
+        );
+        let collider = ColliderBuilder::ball(0.26).density(0.4).build();
+        self.colliders
+            .insert_with_parent(collider, body, &mut self.bodies);
+        self.notes.push(NoteNode { body, title, path });
+    }
+
+    pub fn clear_notes(&mut self) {
+        for n in std::mem::take(&mut self.notes) {
+            if self.grabbed.map(|(h, _)| h) == Some(n.body) {
+                self.grabbed = None;
+            }
+            self.bodies.remove(
+                n.body,
+                &mut self.islands,
+                &mut self.colliders,
+                &mut self.impulse_joints,
+                &mut self.multibody_joints,
+                true,
+            );
+        }
+        self.note_links.clear();
+    }
+
+    /// Force-directed layout (Notes System spec): wikilink springs pull,
+    /// every pair repels, and a soft anchor holds the cloud over the stage.
+    fn apply_graph_forces(&mut self) {
+        if self.notes.is_empty() {
+            return;
+        }
+        let positions: Vec<Vec3> = self
+            .notes
+            .iter()
+            .filter_map(|n| {
+                self.bodies
+                    .get(n.body)
+                    .map(|b| Vec3::new(b.translation().x, b.translation().y, b.translation().z))
+            })
+            .collect();
+        if positions.len() != self.notes.len() {
+            return;
+        }
+        let center = Vec3::new(0.0, 3.4, 0.0);
+        let mut forces = vec![Vec3::ZERO; positions.len()];
+        for i in 0..positions.len() {
+            // Soft anchor to the cloud center.
+            forces[i] += (center - positions[i]) * 0.6;
+            // Pairwise repulsion (n ≤ ~100 notes: O(n²) is fine).
+            for j in (i + 1)..positions.len() {
+                let d = positions[i] - positions[j];
+                let len2 = d.length_squared().max(0.05);
+                let push = d / len2 * 1.4;
+                forces[i] += push;
+                forces[j] -= push;
+            }
+        }
+        // Wikilink springs (rest length 1.6).
+        for &(a, b) in &self.note_links {
+            if a >= positions.len() || b >= positions.len() {
+                continue;
+            }
+            let d = positions[b] - positions[a];
+            let len = d.length().max(1e-3);
+            let f = d / len * (len - 1.6) * 2.2;
+            forces[a] += f;
+            forces[b] -= f;
+        }
+        let grabbed = self.grabbed.map(|(h, _)| h);
+        for (n, f) in self.notes.iter().zip(forces) {
+            // The grabbed node belongs to the grab spring, not the layout.
+            if grabbed == Some(n.body) {
+                continue;
+            }
+            if let Some(body) = self.bodies.get_mut(n.body) {
+                // Forces persist in rapier — reset, then apply this tick's.
+                body.reset_forces(true);
+                body.add_force(vector![f.x, f.y, f.z], true);
+            }
+        }
+    }
+
     /// Advance simulation by real elapsed time (fixed-step accumulator).
     pub fn step(&mut self, elapsed: f32) {
         self.accumulator = (self.accumulator + elapsed).min(DT * MAX_STEPS_PER_FRAME as f32);
         while self.accumulator >= DT {
             self.accumulator -= DT;
+            self.apply_graph_forces();
             self.pipeline.step(
                 &vector![0.0, -9.81, 0.0],
                 &self.integration,
@@ -277,6 +380,13 @@ impl Physics {
     }
 
     /// Per-prop render data: position, rotation quaternion, shape, half, color.
+    /// Stage props only (no graph nodes) — the ABI's StageList view.
+    pub fn prop_instances(&self) -> Vec<([f32; 3], [f32; 4], u8, f32, [f32; 3])> {
+        let mut all = self.instances();
+        all.truncate(self.props.len());
+        all
+    }
+
     pub fn instances(&self) -> Vec<([f32; 3], [f32; 4], u8, f32, [f32; 3])> {
         self.props
             .iter()
@@ -309,6 +419,18 @@ impl Physics {
                     color,
                 ))
             })
+            .chain(self.notes.iter().filter_map(|n| {
+                let body = self.bodies.get(n.body)?;
+                let t = body.translation();
+                let r = body.rotation();
+                Some((
+                    [t.x, t.y, t.z],
+                    [r.i, r.j, r.k, r.w],
+                    1u8, // sphere
+                    0.26,
+                    [0.55, 0.78, 1.0],
+                ))
+            }))
             .collect()
     }
 }

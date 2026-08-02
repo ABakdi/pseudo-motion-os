@@ -444,6 +444,68 @@ impl Kernel {
         self.face.eyes_closed = closed;
     }
 
+    /// Scan /notes for markdown + wikilinks and spawn the graph (ABI 1.12).
+    fn build_notes_graph(&mut self) {
+        // Collect (title, path, body) for every .md under /notes.
+        let mut files: Vec<(String, String)> = Vec::new(); // (path, text)
+        let mut stack = vec!["/notes".to_string()];
+        while let Some(dir) = stack.pop() {
+            let Some(entries) = self.vfs.list(&dir) else {
+                continue;
+            };
+            for e in entries {
+                let full = format!("{dir}/{}", e.name);
+                if e.dir {
+                    stack.push(full);
+                } else if e.name.ends_with(".md") {
+                    if let Some(bytes) = self.vfs.read(&full) {
+                        files.push((full, String::from_utf8_lossy(&bytes).into_owned()));
+                    }
+                }
+            }
+            if files.len() >= 100 {
+                break; // O(n²) layout budget
+            }
+        }
+        let title_of = |path: &str| -> String {
+            path.rsplit('/')
+                .next()
+                .unwrap_or(path)
+                .trim_end_matches(".md")
+                .to_string()
+        };
+        // Spawn nodes on a ring above the stage; layout forces take over.
+        let n = files.len().max(1) as f32;
+        for (i, (path, _)) in files.iter().enumerate() {
+            let a = i as f32 / n * std::f32::consts::TAU;
+            self.phys.spawn_note(
+                glam::Vec3::new(a.cos() * 2.2, 3.4 + (i % 3) as f32 * 0.4, a.sin() * 2.2),
+                title_of(path),
+                path.clone(),
+            );
+        }
+        // Wikilinks: [[Target]] → spring to the note titled Target.
+        for (i, (_, text)) in files.iter().enumerate() {
+            for part in text.split("[[").skip(1) {
+                let Some(end) = part.find("]]") else { continue };
+                let target = part[..end].trim().to_lowercase();
+                if let Some(j) = files
+                    .iter()
+                    .position(|(p, _)| title_of(p).to_lowercase() == target)
+                {
+                    if j != i && !self.phys.note_links.contains(&(j.min(i), j.max(i))) {
+                        self.phys.note_links.push((j.min(i), j.max(i)));
+                    }
+                }
+            }
+        }
+        log::info!(
+            "notes graph: {} nodes, {} links",
+            self.phys.notes.len(),
+            self.phys.note_links.len()
+        );
+    }
+
     /// Platform delivered a WebFetch body (ABI 1.11).
     pub fn web_result(&mut self, id: u32, ok: bool, body: String) {
         self.push_event(proc::SHELL_PID, KernelEvent::WebResult { id, ok, body });
@@ -679,9 +741,10 @@ impl KernelApi for Kernel {
             }
             Syscall::StageList => {
                 self.require(caller, &Capability::PhysSpawn)?;
+                // Props only — graph nodes are notes, not stage objects.
                 let list: Vec<serde_json::Value> = self
                     .phys
-                    .instances()
+                    .prop_instances()
                     .iter()
                     .enumerate()
                     .map(|(i, (pos, _, shape, half, color))| {
@@ -712,6 +775,46 @@ impl KernelApi for Kernel {
                     gfx.light_ambient = ambient.clamp(0.0, 1.0);
                 }
                 Ok(Reply::None)
+            }
+            Syscall::GraphShow { show } => {
+                self.require(caller, &Capability::NotesRead)?;
+                self.phys.clear_notes();
+                if show {
+                    self.build_notes_graph();
+                }
+                Ok(Reply::None)
+            }
+            Syscall::GraphLabels { viewport } => {
+                self.require(caller, &Capability::NotesRead)?;
+                let Some(gfx) = self.gfx.as_ref() else {
+                    return Ok(Reply::Bytes(b"{}".to_vec()));
+                };
+                let vp = gfx.camera.view_proj(viewport[0].max(1.0) / viewport[1].max(1.0));
+                let mut nodes = Vec::new();
+                for n in &self.phys.notes {
+                    let Some(body) = self.phys.bodies.get(n.body) else {
+                        continue;
+                    };
+                    let t = body.translation();
+                    let clip = vp * glam::Vec4::new(t.x, t.y, t.z, 1.0);
+                    if clip.w <= 0.05 {
+                        nodes.push(serde_json::Value::Null); // behind camera
+                        continue;
+                    }
+                    let ndc = clip.truncate() / clip.w;
+                    nodes.push(serde_json::json!({
+                        "title": n.title,
+                        "path": n.path,
+                        "x": (ndc.x * 0.5 + 0.5) * viewport[0],
+                        "y": (0.5 - ndc.y * 0.5) * viewport[1],
+                        "depth": clip.w,
+                    }));
+                }
+                let json = serde_json::json!({
+                    "nodes": nodes,
+                    "links": self.phys.note_links,
+                });
+                Ok(Reply::Bytes(json.to_string().into_bytes()))
             }
             Syscall::WebFetch { url } => {
                 self.require(caller, &Capability::NetLlm)?;
