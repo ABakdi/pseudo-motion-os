@@ -12,6 +12,11 @@ Entry format:
 
 ---
 
+## [2026-08-01] — M9 tasks 1–2: the browser finally works; the Launcher is gone
+### Code
+- **Browser root cause** (live-debugged in Chrome against the deployed site): `windows()` computed the Browser's content rect into a local that was dropped — `self.browser_view` stayed `None`, the platform iframe never got a URL or rect, broken since M8 for every site. One assignment fixes it. Verified live: Wikipedia renders inside the window, scrolls natively, and the iframe tracks the window as it moves.
+- **Launcher removed**: overlay, palm-hold trigger, dock ◆, palette command — all deleted per user decision; verified live (dock renders 8 icons, no ◆).
+
 ## [2026-08-01] — M9 specced: the Voice OS, Computer Sign Language, and face/eye roadmap
 ### Specs
 - **[[Computer Sign Language]] (new):** motion signs as words — four-parameter sign anatomy (handshape/location/movement/orientation), the sign-FSM engine with Midas guards, v1 vocabulary (RECORD ✋→✊ squeeze · COMMAND ☝ chin-outward flick, ASL-inspired with attribution · CANCEL palm push), the two-handed 3D grammar (dominant selects, non-dominant modifies; two-palm zoom), and the M10 face layer (FaceLandmarker: 478 landmarks + 52 blendshapes, face gestures, honest coarse-gaze limits).
