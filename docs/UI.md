@@ -36,7 +36,10 @@ The OS is entered through a deliberate, cinematic sequence:
 - Windows are owned by processes; closing the last window of a DSL app terminates its process.
 
 ### 2.2 The Dock
-Bottom-center bar: running apps (with window previews on hover/point-dwell), pinned favorites, and three system items — **Launcher**, **AI palette**, **System tray**. Auto-hides in presentation mode.
+Bottom-center bar: running apps (with window previews on hover/point-dwell), pinned favorites, and system items — **AI palette**, **System tray**. Auto-hides in presentation mode. *(The Launcher was removed entirely 2026-08-01 — the dock and palette are the launching surfaces; §2.3 is retired until revisited.)*
+
+### 2.9 The Voice Kit widget *(2026-08-01)*
+Top-right shell chrome for the always-on voice layer — full spec: [[Voice Kit]]. Collapsed = status chip (`● REC` pulsing while capturing — never hidden while the mic is live); expanded = live transcript with commands in accent color, search, and →note. Toggled by the RECORD sign (✋→✊, [[Computer Sign Language#4]]) or click.
 
 ### 2.3 The Launcher
 Fullscreen-overlay grid of installed apps (built-ins + saved Conjure apps from `/apps`). Opened by: dock button, `Super` key, or *open-palm hold* gesture. Type-to-filter immediately.

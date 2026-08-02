@@ -27,8 +27,11 @@ camera (getUserMedia, main thread — unavailable in workers)
   → feature extraction (fingertip distances, finger extension states, palm normal, velocity)
   → static pose classifier (rule-based on features — deterministic, debuggable)
   → temporal layer (state machine: pose + hold-time + motion → gesture events)
+  → sign engine (motion signs — [[Computer Sign Language]], 2026-08-01)
   → kernel input events (source-tagged, fused with mouse/voice)
 ```
+
+> **2026-08-01:** dynamic gestures graduated into their own spec — [[Computer Sign Language]] (motion signs, the two-handed 3D grammar, and the M10 face-mesh/eye layer). This document remains the source of truth for the static pose alphabet and the pointer pipeline.
 
 - **Rule-based, not ML classification**, for the pose layer: 9 topologically distinct poses need no trained classifier, and deterministic rules are tunable per-user and explainable when a gesture misfires. Raw landmarks remain available to userland apps via `input:raw-hands` capability for experiments.
 - **Coordinate mapping:** the cursor anchor (§2.1) maps to screen space through an adjustable *control box* (a subregion of camera view ≈ 40 cm × 25 cm of real space) — small comfortable hand motions cover the whole screen.
@@ -58,7 +61,7 @@ One-Euro smoothing (§2) remains the base layer beneath all three. Tuning: `HOLD
 | G2 | **Pinch** 👌 | thumb–index fingertips touch | Primary select / click; **pinch-hold + move = drag** | Highest-precision fingertip event a webcam can see; maps to "pick precisely". Enter < 25 mm, exit > 40 mm (hysteresis). |
 | G3 | **Middle pinch** | thumb–middle fingertips touch | Secondary click / context menu | Same motor pattern as G2, adjacent finger → trivially learnable as "the other click". |
 | G4 | **Grab** ✊ | all fingers curled to fist | Grab window / 3D object (kinematic spring attach); release = drop, release-with-motion = **throw** | Whole-hand closure for whole-object manipulation mirrors real grasping; velocity inheritance makes throwing feel free. |
-| G5 | **Open-palm hold** ✋ (0.6 s) | all five extended, palm to camera | Open the **Launcher** | "Show me everything" — palm-out is a natural stop/attention pose; the hold prevents accidental fires while gesturing in speech. |
+| G5 | **Open-palm** ✋ | all five extended, palm to camera | ~~Open the Launcher~~ **Launcher removed entirely (user decision 2026-08-01)** — the palm is now the entry pose of the **RECORD sign** (✋→✊ squeeze toggles Voice Kit capture, [[Computer Sign Language#4]]). Apps launch from the dock and palette. | Palm-out is a natural attention pose; "grabbing the air" to catch sound is iconic. |
 | G6 | **Swipe** 🖐️→ | open hand, lateral motion > 0.7 m/s | Switch virtual desktop (left/right); in scrollable context: page | Broad motion for broad navigation; the velocity floor separates it from repositioning. |
 | G7 | **Two-finger drag** ✌️+move | index+middle extended, move vertically | Over UI: scroll the focused view. **Over the empty stage: zoom the camera** *(implemented 2026-08-01 — modality parity with the mouse wheel)* | Direct steal from trackpad muscle memory. Palm-tilt scroll is an optional alt mode in settings. |
 | G8 | **Call sign** 🤙 | thumb+pinky extended, others curled | **Tap (< 0.5 s): toggle the command palette.** **Hold (≥ 0.6 s): voice command mode** — palette opens listening, the transcript streams live into the input line, end of utterance executes it *(implemented 2026-07-31)*. The dwell makes the voice trigger impossible to hit by accident. Voice **notes** (long dictation → notes inbox, [[Notes System#Voice capture]]) remain a follow-up on this same anchor. | The "call me" sign is the most iconic "talk" gesture that exists; tap-vs-hold gives palette and voice capture one memorable anchor. Topologically unique (only pose using the pinky alone with thumb). |
@@ -91,7 +94,7 @@ Never required; always a superset of a one-hand or mouse path.
 | Parameter | Default | Range |
 |---|---|---|
 | Pinch enter / exit distance | 25 mm / 40 mm | 15–60 |
-| Open-palm launcher hold | 0.6 s | 0.3–1.5 |
+| RECORD squeeze window (✋→✊) | palm ≥ 0.3 s, fist within 0.8 s | 0.2–1.5 |
 | 🤙 tap vs. hold boundary | 0.5 s / 0.6 s | fixed ratio, scalable |
 | Swipe velocity floor | 0.7 m/s | 0.4–1.2 |
 | Dwell-as-hover | 800 ms | 400–2000 |

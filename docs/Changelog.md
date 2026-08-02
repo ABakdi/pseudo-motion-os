@@ -12,6 +12,13 @@ Entry format:
 
 ---
 
+## [2026-08-01] — M9 specced: the Voice OS, Computer Sign Language, and face/eye roadmap
+### Specs
+- **[[Computer Sign Language]] (new):** motion signs as words — four-parameter sign anatomy (handshape/location/movement/orientation), the sign-FSM engine with Midas guards, v1 vocabulary (RECORD ✋→✊ squeeze · COMMAND ☝ chin-outward flick, ASL-inspired with attribution · CANCEL palm push), the two-handed 3D grammar (dominant selects, non-dominant modifies; two-palm zoom), and the M10 face layer (FaceLandmarker: 478 landmarks + 52 blendshapes, face gestures, honest coarse-gaze limits).
+- **[[Voice Kit]] (new):** always-on transcription after onboarding, top-right widget (collapsed status chip never hidden while live / expanded live transcript with accent-colored commands), continuous Whisper session loop, `/voice` persistence with search and →note, and the AI context envelope (focused object, stage, windows, recent transcript).
+- [[Hand Gestures]]: **Launcher removed entirely** (user decision) — palm belongs to RECORD; sign engine added to the pipeline; G5/tuning updated. [[UI]]: dock loses the launcher entry, §2.9 Voice Kit widget added. [[AI System]] §5: continuous mode, context envelope, and the three web tools (`web_open`/`web_search`/`web_fetch`) with their honest CORS constraints.
+- [[Todo]]: **M9** (9 ordered tasks, immediate fixes first) and **M10** (face & eyes) added.
+
 ## [2026-08-01] — Stage navigation: camera pan and hand zoom
 ### Code
 - `OrbitCamera::pan` — view-plane target panning with clamps (the galaxy stays unreachable); shift+left-drag or middle-drag over empty stage pans, "grab the world" direction.
@@ -304,6 +311,9 @@ Entry format:
 
 | Date | Decision | Rationale |
 |------|----------|-----------|
+| 2026-08-01 | Launcher removed entirely | Dock + palette cover launching; the open palm is reassigned to the RECORD sign |
+| 2026-08-01 | Voice is always-on after onboarding (local Whisper) | Ambient voice OS; on-device transcription keeps always-on ≠ always-uploading; visible ● REC chip is the trust anchor |
+| 2026-08-01 | Dynamic gestures = Computer Sign Language (own spec) | Static poses saturated; ASL-inspired motion signs scale the vocabulary; face/eyes layer planned on the same worker |
 | 2026-08-01 | Stage boots clean — no scattered demo props | Clunky first impression; physics/grab stays for notes-as-bodies & conjured objects |
 | 2026-07-29 | Custom wgpu layer, no Bevy | Full render-graph control (RT compute pass + egui-to-texture); small binary |
 | 2026-07-29 | AI apps = interpreted declarative format ("Conjure") | No in-browser rustc; host-enforced sandbox; reliable LLM output; evolvable |

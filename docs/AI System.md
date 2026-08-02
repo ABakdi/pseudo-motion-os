@@ -115,7 +115,10 @@ mic (getUserMedia / Web Speech API)
 - Kernel interface (engine-agnostic — swapping engines touched zero kernel code): `VoiceCapture` syscall / `VoiceStatus`+`VoiceTranscript` events (ABI 1.5, `voice:input` capability), one utterance per 🤙-hold. **Only text crosses into the kernel — audio never does**, the mirror of the camera landmarks-only boundary.
 - Routing (implemented): transcripts run through the *same* palette brain as typed input — app names (with spoken "open/launch/start the …" verbs stripped) launch apps, `make/create/build …` conjures via the App Smith, and anything unrecognized goes to the System Assistant, because spoken input is conversational (typed input keeps the explicit `>` prefix and the "unknown command" hint).
 - TTS (optional, off by default): Web Speech synthesis for assistant replies in presentation mode.
-- Still deferred: the G8-hold **voice note** path into the notes inbox; a Settings toggle for model size (`tiny` → `base`/`small` for better accuracy at a bigger download).
+- **Continuous mode (M9, [[Voice Kit]]):** capture becomes always-on after onboarding — Whisper sessions loop (VAD closes an utterance, the engine restarts immediately), the RECORD sign pauses/resumes, and every finalized utterance lands in the persistent transcript (`/voice`). The one-utterance 🤙-hold flow remains as the palette's push-to-talk.
+- **Context envelope (M9):** voice commands reach the assistant wrapped with the focused stage object, a stage summary, open windows, and recent transcript lines — assembled by the shell ([[Voice Kit#5]]).
+- **Web access (M9):** three tools — `web_open {url}` (drives the Browser app, visible to the user); `web_search {query}` via the Wikipedia OpenSearch API (CORS-open, keyless — honest v1: encyclopedia search, not the whole web); `web_fetch {url}` through the Jina Reader proxy (`https://r.jina.ai/<url>`, free, returns page text CORS-open — documented third-party dependency, off by default until the user enables it in Settings → AI). Tauri-native fetch replaces the proxy on desktop later.
+- Still deferred: a Settings toggle for Whisper model size (`tiny` → `base`/`small` for better accuracy at a bigger download).
 
 ---
 

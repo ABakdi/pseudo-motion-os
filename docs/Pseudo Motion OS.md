@@ -2,7 +2,7 @@
 **Introduction — Specification v0.3** *(2026-07-29)*
 
 > This is the entry point of the specification. Details live in the linked documents:
-> [[Architecture]] · [[UI]] · [[Hand Gestures]] · [[Notes System]] · [[AI System]] · [[App DSL]] · [[Changelog]]
+> [[Architecture]] · [[UI]] · [[Hand Gestures]] · [[Computer Sign Language]] · [[Voice Kit]] · [[Notes System]] · [[AI System]] · [[App DSL]] · [[Changelog]]
 
 ---
 
@@ -117,7 +117,9 @@ flowchart TB
 |----------|----------|
 | [[Architecture]] | Layered architecture in depth: kernel subsystems, syscall ABI, process & capability model, frame loop, worker topology, browser/OS interfacing, Tauri mode. |
 | [[UI]] | The shell: 3D stage, windows, dock, launcher, command palette, notifications; interaction and focus model across mouse/gesture/voice. |
-| [[Hand Gestures]] | Complete gesture vocabulary (one-hand core + two-hand enhancers), ergonomics rules, recognition pipeline, tuning parameters. |
+| [[Hand Gestures]] | Static pose vocabulary, ergonomics rules, recognition pipeline, tuning parameters. |
+| [[Computer Sign Language]] | Motion signs (ASL-inspired), the sign-FSM engine, two-handed 3D grammar, face-mesh & gaze roadmap. |
+| [[Voice Kit]] | Always-on transcription, the top-right widget, voice commands with AI context, /voice persistence. |
 | [[Notes System]] | The Obsidian-style linked notes subsystem: markdown, wikilinks, backlinks, voice capture, AI assistance. |
 | [[AI System]] | Agent model, multi-provider support (API keys & local LLMs), tool/syscall interface, app-generation workflow, safety. |
 | [[App DSL]] | The Conjure format in full: manifest, state, widgets, events, expression language grammar, actions, limits, examples. |

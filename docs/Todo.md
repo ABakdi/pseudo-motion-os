@@ -116,6 +116,25 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 - [x] **Appearance: backgrounds, color schemes, selectable text** — Settings → Appearance ([[UI#6.1 Appearance settings|spec §6.1]]): 4 sky presets (Deep Space / Ember Nebula / Aurora / Void — one sky shader, per-preset palette via uniform, `Background` syscall ABI 1.7) + 4 accent schemes (Ion / Ember / Verdant / Rose — runtime theme tokens, cursor/dock/palette restyle instantly); persisted to `/settings/appearance.json`, shell re-applies at boot. Text selectable everywhere with real clipboard copy (`navigator.clipboard` bridge); Notes sidebar resizable; Settings scrolls. *(Deferred: light theme, reduced-motion toggle.)*
 - [x] **In-browser LLM is the default provider** — AI works with ZERO setup: WebLLM (ABI 1.6 kind 2) runs the model on the user's GPU in the browser, free, no API key, downloaded once and cached, offline afterwards, prompts never leave the machine. Three performance tiers in Settings → AI (Fast 0.5B ~0.6 GB · Balanced 1B ~0.9 GB default · Quality 3B ~1.9 GB); download progress streams live into the palette via the new `'\r'`-replace AiChunk semantics; remote providers (Anthropic / OpenAI-compatible / Ollama) remain one dropdown away. *(Deferred: WebLLM worker offload, per-agent provider binding.)*
 
+## M9 — The Voice OS & Computer Sign Language *(specced 2026-08-01 — [[Voice Kit]], [[Computer Sign Language]])*
+*Goal: voice becomes ambient (always-on transcription with visible status), hands speak signs not just poses, the AI acts with context, and the browser honestly works. Ordered: immediate fixes first.*
+
+- [ ] **1. Browser: actually loads and is interactive** — live-debug why the iframe shows nothing (Brave shields? wiring? embed refusals), verify embeddable start pages against real headers, make interaction (click/scroll/type inside the page) work, and surface refusals honestly instead of blank white. *(Spec: [[Pseudo Motion OS]] §4.8)*
+- [ ] **2. Remove the Launcher** — delete the overlay + palm-hold trigger + dock ◆ entry (user decision; dock + palette are the launching surfaces). Frees the palm for RECORD.
+- [ ] **3. CSL sign engine + RECORD** — motion-primitive layer over the pose stream (HOLD/SQUEEZE/FLICK_OUT/PUSH FSMs, Midas guards, refractory); first sign: ✋→✊ squeeze toggles voice capture. *(Spec: [[Computer Sign Language#3]]–[[Computer Sign Language#4|4]])*
+- [ ] **4. Voice Kit widget + continuous transcription** — top-right chip (● REC pulsing, never hidden while live), expandable live transcript; Whisper session loop with auto-restart; capture-on-boot when mic granted. *(Spec: [[Voice Kit#1]]–[[Voice Kit#2|2]])*
+- [ ] **5. Voice persistence + search + →note** — `/voice/<date>/<session>.json` incremental writes; widget search + terminal `voice <query>`; session→markdown note conversion. *(Spec: [[Voice Kit#4]])*
+- [ ] **6. COMMAND sign + command stream** — ☝ chin-outward FLICK_OUT marks the next utterance as a command (accent color, ⌘ list per session); command routing through the palette brain. *(Spec: [[Computer Sign Language#4]], [[Voice Kit#3]])*
+- [ ] **7. AI context envelope** — focused object + stage summary + open windows + recent transcript wrapped around every voice command to the assistant. *(Spec: [[Voice Kit#5]])*
+- [ ] **8. AI web access** — `web_open` (drives the Browser app) · `web_search` (Wikipedia OpenSearch, CORS-open) · `web_fetch` (Jina Reader proxy, opt-in). *(Spec: [[AI System#5]])*
+- [ ] **9. Two-handed 3D grammar** — dominant pinch-hold selects/focuses an object (outline + AI context); non-dominant fist-twist rotates, ✌ drag scales; two-palm spread/approach zooms the camera. *(Spec: [[Computer Sign Language#5]])*
+
+## M10 — Face & Eyes *(research-informed, spec in [[Computer Sign Language#6]])*
+- [ ] **FaceLandmarker in the gesture worker** — 478 landmarks + 52 blendshapes beside the hand model (same tasks-vision lib); landmarks-only privacy boundary extended to the face.
+- [ ] **Face-anchored signs** — COMMAND gains its true chin anchor; location parameter becomes face-relative.
+- [ ] **Face gestures (opt-in)** — brow-raise confirm · double-blink click · mouth-"O" push-to-talk; conservative thresholds + debounce.
+- [ ] **Gaze assist (experimental)** — iris+head-pose coarse gaze regions for window focus soft-highlight; calibrated gaze cursor stays a research track.
+
 ---
 
 *When a task completes: tick it here, log it in [[Changelog]], commit incrementally.*
