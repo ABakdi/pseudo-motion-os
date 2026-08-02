@@ -71,6 +71,38 @@ fn str_prop<'a>(node: &'a Node, key: &str) -> Option<&'a str> {
     node.props.get(key).and_then(|v| v.as_str())
 }
 
+/// A list prop: a literal JSON array, or a `${…}` expression yielding a list.
+fn list_prop(app: &AppInstance, node: &Node, key: &str, now_ms: f64) -> Vec<Value> {
+    match node.props.get(key) {
+        Some(serde_json::Value::Array(a)) => a
+            .iter()
+            .map(|v| match v {
+                serde_json::Value::Number(n) => Value::Num(n.as_f64().unwrap_or(0.0)),
+                serde_json::Value::Bool(b) => Value::Bool(*b),
+                other => Value::Str(other.as_str().unwrap_or_default().to_string()),
+            })
+            .collect(),
+        Some(serde_json::Value::String(s)) => {
+            let locals = HashMap::new();
+            let env = Env {
+                state: &app.state,
+                locals: &locals,
+                now_ms,
+            };
+            let src = s
+                .strip_prefix("${")
+                .and_then(|x| x.strip_suffix('}'))
+                .unwrap_or(s);
+            match expr::parse(src).and_then(|e| expr::eval(&e, &env)) {
+                Ok(Value::List(items)) => items,
+                Ok(other) => vec![other],
+                Err(_) => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
 fn fire(app: &mut AppInstance, node: &Node, event: &str, now_ms: f64) {
     if let Some(handler) = str_prop(node, event) {
         app.run_handler(&handler.to_string(), &HashMap::new(), now_ms);
@@ -203,6 +235,71 @@ fn render_node(app: &mut AppInstance, node: &Node, ui: &mut egui::Ui, now_ms: f6
             if ui.checkbox(&mut value, text).changed() {
                 app.state.insert(bind, Value::Bool(value));
                 fire(app, node, "on_change", now_ms);
+            }
+        }
+        "dropdown" => {
+            let Some(bind) = str_prop(node, "bind").map(|s| s.to_string()) else {
+                return;
+            };
+            let options = list_prop(app, node, "options", now_ms)
+                .into_iter()
+                .map(|v| v.display())
+                .collect::<Vec<_>>();
+            let mut current = app
+                .state
+                .get(&bind)
+                .map(|v| v.display())
+                .unwrap_or_default();
+            let mut changed = false;
+            egui::ComboBox::from_id_salt(("conjure-dropdown", &bind))
+                .selected_text(current.clone())
+                .show_ui(ui, |ui| {
+                    for opt in &options {
+                        if ui
+                            .selectable_value(&mut current, opt.clone(), opt)
+                            .changed()
+                        {
+                            changed = true;
+                        }
+                    }
+                });
+            if changed {
+                app.state.insert(bind, Value::Str(current));
+                fire(app, node, "on_change", now_ms);
+            }
+        }
+        "list_view" => {
+            // v1 subset (App DSL §5): `items` list + `template` string with
+            // `item`/`i` locals; optional `on_remove` handler gets the same
+            // locals. (The full widget-template `item_ui` form is future.)
+            let items = list_prop(app, node, "items", now_ms);
+            let template = str_prop(node, "template").unwrap_or("${item}").to_string();
+            let on_remove = str_prop(node, "on_remove").map(|s| s.to_string());
+            for (i, item) in items.into_iter().enumerate().take(4096) {
+                let mut locals = HashMap::new();
+                locals.insert("item".to_string(), item);
+                locals.insert("i".to_string(), Value::Num(i as f64));
+                let env = Env {
+                    state: &app.state,
+                    locals: &locals,
+                    now_ms,
+                };
+                let line = expr::parse_template(&template)
+                    .and_then(|t| expr::eval_template(&t, &env))
+                    .unwrap_or_else(|_| template.clone());
+                ui.horizontal(|ui| {
+                    ui.label(line);
+                    if let Some(handler) = &on_remove {
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                if ui.small_button("✕").clicked() {
+                                    app.run_handler(handler, &locals, now_ms);
+                                }
+                            },
+                        );
+                    }
+                });
             }
         }
         "progress" => {

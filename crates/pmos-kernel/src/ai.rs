@@ -232,7 +232,7 @@ Schema:
 {"conjure":"1.0","manifest":{"id":"kebab-case-id","name":"Name","icon":"one emoji","description":"...","window":{"size":[W,H],"resizable":true}},"state":{"name":{"type":"number|string|bool|list","value":...}},"ui":<node>,"handlers":{"name":[<action>...]},"timers":[{"id":"t","every_ms":1000,"handler":"tick","autostart":true}]}
 
 A <node> is {"w":"<widget>",...props,"children":[<node>...]}.
-Widgets: column,row (props: spacing,align) · group (title) · scroll · separator · spacer (size) · label (text,size:"small|body|heading|title",color:"#rrggbb",bold) · button (text,on_click) · text_input (bind,placeholder,multiline) · slider (bind,min,max,step,on_change) · checkbox/toggle (bind,text,on_change) · progress (value 0..1) · if (cond, then-children in "children").
+Widgets: column,row (props: spacing,align) · group (title) · scroll · separator · spacer (size) · label (text,size:"small|body|heading|title",color:"#rrggbb",bold) · button (text,on_click) · text_input (bind,placeholder,multiline) · slider (bind,min,max,step,on_change) · checkbox/toggle (bind,text,on_change) · dropdown (bind,options:["a","b"] or "${listExpr}",on_change) · list_view (items:"${listExpr}",template:"${i+1}. ${item}",on_remove — handler sees locals item,i) · progress (value 0..1) · if (cond, then-children in "children").
 
 An <action> is {"do":"<verb>",...}: set{target,value} · toggle{target} · inc{target,by} · push{target,value} · remove_at{target,index} · clear{target} · if{cond,then:[...],else:[...]} · emit{handler} (no cycles) · notify{title,body} · window{op:"close"|"set_title",title} · timer{op:"start"|"stop"|"reset",id}.
 
