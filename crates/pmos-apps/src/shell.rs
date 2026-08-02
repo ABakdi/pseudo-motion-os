@@ -5,6 +5,7 @@ use crate::app_host;
 use crate::apps::{AppAction, AppKind, AppState, ALL};
 use crate::cursor::HandCursor;
 use crate::palette::{Palette, PaletteOutcome, ToolCall};
+use crate::voicekit::{KitAction, VoiceKit};
 use crate::theme;
 use pmos_abi::{KernelApi, KernelEvent, Pid, Reply, Syscall, WinDesc, WinId};
 use pmos_conjure::{AppInstance, Effect};
@@ -39,6 +40,12 @@ pub struct Shell {
     call_fired: bool,
     /// Mirrors VoiceStatus — the RECORD sign toggles based on this.
     voice_listening: bool,
+    /// The always-on voice layer (Voice Kit spec).
+    voicekit: VoiceKit,
+    /// A 🤙-hold palette voice session is waiting for its one utterance.
+    palette_voice: bool,
+    /// In-flight WebFetch tool calls: request id → tool name.
+    pending_web: std::collections::HashMap<u32, String>,
     /// 👍/👎 hold state (G9 stage binding: add / remove-newest).
     thumbs_since: Option<f64>,
     thumbs_fired: bool,
@@ -83,6 +90,9 @@ impl Shell {
             call_since: None,
             call_fired: false,
             voice_listening: false,
+            voicekit: VoiceKit::default(),
+            palette_voice: false,
+            pending_web: std::collections::HashMap::new(),
             thumbs_since: None,
             thumbs_fired: false,
             thumbs_down_since: None,
@@ -126,8 +136,10 @@ impl Shell {
                 }
                 PaletteOutcome::ToolCall(call) => {
                     let (ok, result) = self.execute_tool(kernel, &call, now);
-                    let more = self.palette.tool_result(&call.tool, ok, &result);
-                    self.handle_outcomes(more, kernel, now);
+                    if result != "__deferred__" {
+                        let more = self.palette.tool_result(&call.tool, ok, &result);
+                        self.handle_outcomes(more, kernel, now);
+                    } // else: the WebResult event resumes the tool loop
                 }
                 PaletteOutcome::SpawnConjure(doc) => {
                     if let Err(e) = self.spawn_conjure(kernel, &doc, now) {
@@ -208,6 +220,43 @@ impl Shell {
             },
         );
         self.toast("🗑 removed the newest object".into(), now);
+    }
+
+    /// A compact live-context block for voice commands (Voice Kit spec §5).
+    fn context_envelope(&mut self, kernel: &mut dyn KernelApi) -> String {
+        let stage = match kernel.syscall(self.pid, Syscall::StageList) {
+            Ok(Reply::Bytes(b)) => serde_json::from_slice::<serde_json::Value>(&b)
+                .ok()
+                .and_then(|v| v.as_array().map(|a| a.len()))
+                .map(|n| format!("{n} objects"))
+                .unwrap_or_else(|| "unknown".into()),
+            _ => "unavailable".into(),
+        };
+        let windows: Vec<&str> = self
+            .open_apps
+            .iter()
+            .filter(|a| a.open)
+            .map(|a| a.state.kind.title())
+            .collect();
+        format!(
+            "[context] stage: {stage} · open windows: {} [/context]",
+            if windows.is_empty() { "none".into() } else { windows.join(", ") }
+        )
+    }
+
+    /// Kick off an async WebFetch; the WebResult event resumes the tool loop.
+    fn web_defer(&mut self, kernel: &mut dyn KernelApi, tool: &str, url: String) -> (bool, String) {
+        match kernel.syscall(self.pid, Syscall::WebFetch { url }) {
+            Ok(Reply::Bytes(b)) => match String::from_utf8_lossy(&b).trim().parse::<u32>() {
+                Ok(id) => {
+                    self.pending_web.insert(id, tool.to_string());
+                    (true, "__deferred__".into())
+                }
+                Err(_) => (false, "bad request id".into()),
+            },
+            Err(e) => (false, format!("{e:?}")),
+            Ok(_) => (false, "unexpected reply".into()),
+        }
     }
 
     /// Execute one assistant tool call through capability-checked syscalls
@@ -369,6 +418,39 @@ impl Shell {
                     Err(e) => (false, format!("{e:?}")),
                 }
             }
+            "web_open" => {
+                let url = arg("url");
+                if url.is_empty() {
+                    (false, "missing url".into())
+                } else {
+                    self.launch(kernel, AppKind::Browser);
+                    if let Some(app) = self
+                        .open_apps
+                        .iter_mut()
+                        .find(|a| a.state.kind == AppKind::Browser)
+                    {
+                        app.state.browser_open(&url);
+                    }
+                    (true, format!("opened {url} in the Browser window (visible to the user)"))
+                }
+            }
+            "web_search" => {
+                // Wikipedia OpenSearch: keyless, CORS-open (AI System §5).
+                let url = format!(
+                    "https://en.wikipedia.org/w/api.php?action=opensearch&format=json&origin=*&limit=5&search={}",
+                    urlencode(&arg("query"))
+                );
+                self.web_defer(kernel, &call.tool, url)
+            }
+            "web_fetch" => {
+                // Jina Reader proxy: page → readable text, CORS-open.
+                let url = arg("url");
+                if url.is_empty() {
+                    (false, "missing url".into())
+                } else {
+                    self.web_defer(kernel, &call.tool, format!("https://r.jina.ai/{url}"))
+                }
+            }
             "app_open" => {
                 let name = arg("name").to_lowercase();
                 if !name.is_empty() {
@@ -517,28 +599,95 @@ impl Shell {
                     reason,
                 } => {
                     self.voice_listening = listening;
-                    let outcomes = self.palette.on_voice_status(listening, available, &reason);
-                    ai_outcomes.extend(outcomes);
+                    self.voicekit.on_status(listening);
+                    if self.palette_voice {
+                        let outcomes =
+                            self.palette.on_voice_status(listening, available, &reason);
+                        ai_outcomes.extend(outcomes);
+                        if !listening {
+                            self.palette_voice = false;
+                        }
+                    } else if !available {
+                        self.toast(format!("⚠ voice: {reason}"), now);
+                    }
                 }
                 KernelEvent::Sign { sign } => match sign {
                     pmos_abi::CslSign::Record => {
-                        // ✋ still hold: toggle voice capture (CSL spec §4).
+                        // ✋ still hold: toggle the always-on Voice Kit.
                         if self.voice_listening {
                             let _ =
                                 kernel.syscall(self.pid, Syscall::VoiceCapture { start: false });
-                            self.toast("⏸ voice stopped (hold ✋ still to restart)".into(), now);
+                            self.toast("⏸ voice capture off (hold ✋ still to restart)".into(), now);
                         } else {
-                            self.palette.start_voice();
                             let _ =
                                 kernel.syscall(self.pid, Syscall::VoiceCapture { start: true });
-                            self.toast("● listening — hold ✋ still to stop".into(), now);
+                            self.toast("● voice capture on — hold ✋ still to stop".into(), now);
+                        }
+                    }
+                    pmos_abi::CslSign::Command => {
+                        // ☝ held still while capturing: arm command mode.
+                        if self.voice_listening && !self.voicekit.command_armed {
+                            self.voicekit.command_armed = true;
+                            self.toast("⌘ armed — the next words are a command".into(), now);
                         }
                     }
                     _ => {}
                 },
                 KernelEvent::VoiceTranscript { text, is_final } => {
-                    let outcomes = self.palette.on_voice_transcript(text, is_final);
-                    ai_outcomes.extend(outcomes);
+                    if self.palette_voice {
+                        // 🤙 push-to-talk: the palette owns this utterance.
+                        let outcomes = self.palette.on_voice_transcript(text.clone(), is_final);
+                        ai_outcomes.extend(outcomes);
+                        if is_final {
+                            self.palette_voice = false;
+                        }
+                    } else if is_final {
+                        // Ambient transcript → the Voice Kit; ⌘-armed
+                        // utterances route as commands with AI context.
+                        let is_cmd = self.voicekit.command_armed;
+                        self.voicekit.command_armed = false;
+                        self.voicekit
+                            .on_final(&text, is_cmd, kernel, self.pid, today, now);
+                        if is_cmd {
+                            let ctx_env = self.context_envelope(kernel);
+                            let outcomes = self
+                                .palette
+                                .run_voice_command(text)
+                                .into_iter()
+                                .map(|o| match o {
+                                    PaletteOutcome::Prompt(agent, msg)
+                                        if agent == pmos_abi::AGENT_ASSISTANT =>
+                                    {
+                                        PaletteOutcome::Prompt(
+                                            agent,
+                                            format!("{ctx_env}\n\nUser (voice): {msg}"),
+                                        )
+                                    }
+                                    other => other,
+                                })
+                                .collect();
+                            ai_outcomes.extend::<Vec<PaletteOutcome>>(outcomes);
+                        }
+                    } else {
+                        self.voicekit.on_interim(&text);
+                    }
+                }
+                KernelEvent::WebResult { id, ok, body } => {
+                    if let Some(tool) = self.pending_web.remove(&id) {
+                        let mut body = body;
+                        if body.len() > 4000 {
+                            let cut = body
+                                .char_indices()
+                                .take_while(|(i, _)| *i < 4000)
+                                .last()
+                                .map(|(i, c)| i + c.len_utf8())
+                                .unwrap_or(0);
+                            body.truncate(cut);
+                            body.push_str("\n… (truncated)");
+                        }
+                        let more = self.palette.tool_result(&tool, ok, &body);
+                        ai_outcomes.extend(more);
+                    }
                 }
                 other => log::debug!("shell event: {other:?}"),
             }
@@ -557,6 +706,7 @@ impl Shell {
             let since = *self.call_since.get_or_insert(now);
             if now - since >= 0.6 && !self.call_fired {
                 self.call_fired = true;
+                self.palette_voice = true;
                 self.palette.start_voice();
                 let _ = kernel.syscall(self.pid, Syscall::VoiceCapture { start: true });
             }
@@ -604,6 +754,15 @@ impl Shell {
         self.dock(ctx, kernel);
         let palette_outcomes = self.palette.ui(ctx);
         self.handle_outcomes(palette_outcomes, kernel, now);
+        for action in self.voicekit.ui(ctx, kernel, self.pid, today) {
+            match action {
+                KitAction::ToggleCapture => {
+                    let start = !self.voice_listening;
+                    let _ = kernel.syscall(self.pid, Syscall::VoiceCapture { start });
+                }
+                KitAction::Toast(t) => self.toast(t, now),
+            }
+        }
         self.draw_toasts(ctx, now);
         self.help_hint(ctx);
         self.cursor.draw(ctx);
@@ -898,6 +1057,20 @@ impl Shell {
                 });
             });
     }
+}
+
+/// Minimal percent-encoding for query strings.
+fn urlencode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 /// Parse "#rrggbb" (hash optional) into linear-ish RGB floats.

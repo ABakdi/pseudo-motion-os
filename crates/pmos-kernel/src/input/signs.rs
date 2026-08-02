@@ -20,6 +20,9 @@ const PALM_HOLD_SECS: f64 = 1.0;
 const MAX_DRIFT_PT: f32 = 70.0;
 /// No sign can fire again within this window of a completed one.
 const REFRACTORY_SECS: f64 = 1.0;
+/// COMMAND: ☝ Point held still this long marks the next utterance (spec §4).
+/// (Chin-anchored once the face mesh provides the location parameter.)
+const POINT_HOLD_SECS: f64 = 0.8;
 
 #[derive(Default)]
 pub struct SignEngine {
@@ -30,6 +33,10 @@ pub struct SignEngine {
     /// Set after firing; the palm must drop before RECORD can re-arm.
     fired: bool,
     refractory_until: f64,
+    // COMMAND (☝ still hold) — same guard structure as RECORD.
+    point_since: Option<f64>,
+    point_anchor: Option<[f32; 2]>,
+    point_fired: bool,
 }
 
 impl SignEngine {
@@ -40,6 +47,11 @@ impl SignEngine {
     fn reset(&mut self) {
         self.palm_since = None;
         self.anchor = None;
+    }
+
+    fn reset_point(&mut self) {
+        self.point_since = None;
+        self.point_anchor = None;
     }
 
     /// Feed one debounced pose frame (with the stabilized cursor position);
@@ -53,9 +65,42 @@ impl SignEngine {
     ) -> Option<CslSign> {
         if !tracking {
             self.reset();
+            self.reset_point();
             self.fired = false;
+            self.point_fired = false;
             return None;
         }
+        // COMMAND: a still ☝ Point hold. Runs beside RECORD — the shell only
+        // acts on it while voice capture is live, which keeps ordinary
+        // pointing (which moves) from ever mattering.
+        if pose == HandPose::Point {
+            self.reset();
+            self.fired = false;
+            if self.point_fired || now < self.refractory_until {
+                return None;
+            }
+            if let (Some(anchor), Some(p)) = (self.point_anchor, pos) {
+                let drift = (p[0] - anchor[0]).abs() + (p[1] - anchor[1]).abs();
+                if drift > MAX_DRIFT_PT {
+                    self.point_since = Some(now);
+                    self.point_anchor = pos;
+                    return None;
+                }
+            }
+            let since = *self.point_since.get_or_insert(now);
+            if self.point_anchor.is_none() {
+                self.point_anchor = pos;
+            }
+            if now - since >= POINT_HOLD_SECS {
+                self.reset_point();
+                self.point_fired = true;
+                self.refractory_until = now + REFRACTORY_SECS;
+                return Some(CslSign::Command);
+            }
+            return None;
+        }
+        self.reset_point();
+        self.point_fired = false;
         if pose != HandPose::OpenPalm {
             // Palm dropped: release the fired latch, abort any partial hold.
             self.reset();
@@ -153,6 +198,17 @@ mod tests {
             feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 4.3, 5.5),
             Some(CslSign::Record)
         );
+    }
+
+    #[test]
+    fn still_point_hold_fires_command() {
+        let mut e = SignEngine::new();
+        assert_eq!(
+            feed(&mut e, HandPose::Point, [200.0, 200.0], 0.0, 1.0),
+            Some(CslSign::Command)
+        );
+        // Held pointing does not refire until the pose drops.
+        assert_eq!(feed(&mut e, HandPose::Point, [200.0, 200.0], 1.1, 3.0), None);
     }
 
     #[test]

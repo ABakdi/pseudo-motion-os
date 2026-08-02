@@ -55,6 +55,15 @@ pub struct Kernel {
     pub gfx: Option<gfx::Gfx>,
     pub hands_directives: HandsDirectives,
     pub voice_directives: VoiceDirectives,
+    /// WebFetch requests waiting for the platform (ABI 1.11): (id, url).
+    pub web_pending: Vec<(u32, String)>,
+    next_web_id: u32,
+    /// Face gesture state (M10): double-blink detection over blendshapes.
+    face: FaceState,
+    /// Set on double-blink; the platform injects a click at the pointer.
+    pub face_click_pending: bool,
+    /// Previous frame's two-palm spread (camera-space) for zoom deltas.
+    last_palm_spread: Option<f32>,
     pub ai: ai::AiState,
     pub vfs: vfs::Vfs,
     pub phys: phys::Physics,
@@ -81,6 +90,11 @@ impl Kernel {
                 capture: false,
                 generation: 0,
             },
+            web_pending: Vec::new(),
+            next_web_id: 1,
+            face: FaceState::default(),
+            face_click_pending: false,
+            last_palm_spread: None,
             ai: ai::AiState::default(),
             vfs: vfs::Vfs::new(),
             phys: phys::Physics::new(),
@@ -120,6 +134,16 @@ impl Kernel {
             let (pose, tracking) = (self.input.hands.pose, self.input.hands.tracking);
             self.input.fusion.step(pose, pos, tracking);
         }
+        // Two-palm zoom (CSL spec §5): both hands open → spreading them
+        // apart zooms out, bringing them together zooms in.
+        let spread = self.input.hands.palm_spread;
+        if let (Some(s), Some(prev), Some(gfx)) =
+            (spread, self.last_palm_spread, self.gfx.as_mut())
+        {
+            gfx.camera.zoom((s - prev) * 12.0);
+        }
+        self.last_palm_spread = spread;
+
         // CSL sign recognition rides the same debounced pose stream.
         if let Some(sign) = self.input.signs.step(
             self.input.hands.pose,
@@ -307,6 +331,41 @@ impl Kernel {
             log::warn!("capability denied for {caller:?}: {cap:?}");
             Err(ErrorCode::CapabilityDenied)
         }
+    }
+}
+
+/// Minimal face-layer state (CSL spec §6, M10): the platform streams a few
+/// blendshape scores; the kernel turns a quick double-blink into a sign.
+#[derive(Default)]
+struct FaceState {
+    eyes_closed: bool,
+    blink_times: Vec<f64>,
+}
+
+impl Kernel {
+    /// Blendshape frame from the platform: [blinkL, blinkR, jawOpen, browUp].
+    pub fn face_frame(&mut self, blink_l: f32, blink_r: f32, now: f64) {
+        let closed = blink_l > 0.55 && blink_r > 0.55;
+        if closed && !self.face.eyes_closed {
+            self.face.blink_times.push(now);
+            self.face.blink_times.retain(|t| now - t < 0.7);
+            if self.face.blink_times.len() >= 2 {
+                self.face.blink_times.clear();
+                self.face_click_pending = true;
+                self.push_event(
+                    proc::SHELL_PID,
+                    KernelEvent::Sign {
+                        sign: pmos_abi::CslSign::DoubleBlink,
+                    },
+                );
+            }
+        }
+        self.face.eyes_closed = closed;
+    }
+
+    /// Platform delivered a WebFetch body (ABI 1.11).
+    pub fn web_result(&mut self, id: u32, ok: bool, body: String) {
+        self.push_event(proc::SHELL_PID, KernelEvent::WebResult { id, ok, body });
     }
 }
 
@@ -571,6 +630,13 @@ impl KernelApi for Kernel {
                     gfx.light_ambient = ambient.clamp(0.0, 1.0);
                 }
                 Ok(Reply::None)
+            }
+            Syscall::WebFetch { url } => {
+                self.require(caller, &Capability::NetLlm)?;
+                let id = self.next_web_id;
+                self.next_web_id += 1;
+                self.web_pending.push((id, url));
+                Ok(Reply::Bytes(id.to_string().into_bytes()))
             }
             Syscall::VoiceCapture { start } => {
                 self.require(caller, &Capability::VoiceInput)?;

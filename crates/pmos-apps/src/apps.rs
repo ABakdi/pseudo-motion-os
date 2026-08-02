@@ -153,6 +153,9 @@ pub struct AppState {
     // voice (Settings → Voice)
     voice_model: String,
     voice_loaded: bool,
+    // face (Settings → Face, M10 opt-in)
+    face_enabled: bool,
+    face_loaded: bool,
     // stage (Settings → Stage, ABI 1.8)
     stage_az: f32,
     stage_el: f32,
@@ -198,6 +201,8 @@ impl AppState {
             llm_tier: None,
             voice_model: "tiny".to_string(),
             voice_loaded: false,
+            face_enabled: false,
+            face_loaded: false,
             stage_az: 215.0,
             stage_el: 60.0,
             stage_intensity: 1.0,
@@ -235,6 +240,12 @@ impl AppState {
     /// returned here. Honest caveat surfaced in the UI: many sites refuse to
     /// be iframed (X-Frame-Options/CSP) — real browsing arrives with Tauri's
     /// native webviews.
+    /// Point the Browser app at a URL (AI web_open tool).
+    pub fn browser_open(&mut self, url: &str) {
+        self.browser_input = url.to_string();
+        self.browser_url = url.to_string();
+    }
+
     pub fn browser_ui(&mut self, ui: &mut egui::Ui) -> Option<(String, egui::Rect)> {
         ui.horizontal(|ui| {
             let resp = ui.add(
@@ -1256,6 +1267,40 @@ impl AppState {
             );
         }
         ui.weak("speech-to-text runs on this machine; a changed size downloads once");
+
+        // ---- Face (M10, opt-in) ----
+        const FACE_PATH: &str = "/settings/face.json";
+        if !self.face_loaded {
+            self.face_loaded = true;
+            if let Ok(pmos_abi::Reply::Bytes(b)) =
+                kernel.syscall(pid, Syscall::FsRead { path: FACE_PATH.into() })
+            {
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
+                    self.face_enabled = v["enabled"].as_bool().unwrap_or(false);
+                }
+            }
+        }
+        ui.add_space(10.0);
+        ui.separator();
+        ui.heading("Face");
+        ui.add_space(4.0);
+        if ui
+            .checkbox(
+                &mut self.face_enabled,
+                "Face gestures — double-blink = click (experimental)",
+            )
+            .changed()
+        {
+            let json = serde_json::json!({ "enabled": self.face_enabled }).to_string();
+            let _ = kernel.syscall(
+                pid,
+                Syscall::FsWrite {
+                    path: FACE_PATH.into(),
+                    bytes: json.into_bytes(),
+                },
+            );
+        }
+        ui.weak("face landmarks only, computed on this machine — video never leaves the camera pipeline");
     }
 
     /// Settings → Stage (ABI 1.8): spawn/clear physics objects, sun control.

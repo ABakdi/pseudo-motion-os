@@ -83,4 +83,15 @@
   }
 
   window.pmosLlm = { request };
+
+  // WebFetch bridge for the AI web tools (ABI 1.11): plain fetch, text out,
+  // truncated platform-side; results return via pmos_web_result.
+  window.pmosWeb = {
+    fetch(id, url) {
+      fetch(url)
+        .then((r) => r.text())
+        .then((t) => window.wasmBindings.pmos_web_result(id, true, t.slice(0, 20000)))
+        .catch((e) => window.wasmBindings.pmos_web_result(id, false, String(e)));
+    },
+  };
 })();

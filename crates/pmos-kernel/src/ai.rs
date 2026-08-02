@@ -211,6 +211,9 @@ Tools:
 - fs_read {"path":"/notes/todo.md"} — read a file
 - fs_write {"path":"/notes/idea.md","content":"..."} — create or overwrite a file (the user sees a toast)
 - app_open {"name":"terminal"} — open a built-in app: terminal, files, notes, settings, browser, ray tracer, hand tracker
+- web_open {"url":"https://en.wikipedia.org/wiki/Rust"} — open a page in the visible Browser window
+- web_search {"query":"quantum entanglement"} — encyclopedia search (Wikipedia; returns JSON titles+links)
+- web_fetch {"url":"https://example.com/article"} — fetch a page as readable text (use for links from web_search or the user)
 
 Stage tools — the 3D space behind the windows. Objects are PHYSICS bodies: they fall, collide, and can be grabbed/thrown. The floor is y=0; sizes are half-extents (0.45 is a good default):
 - stage_spawn {"shape":"cube"|"sphere","x":0,"y":3,"z":0,"size":0.45,"color":"#6ee7ff"} — returns its index

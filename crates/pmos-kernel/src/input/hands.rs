@@ -133,6 +133,9 @@ pub struct HandsState {
     pub tracking: bool,
     pub hands: u8,
     pub camera_enabled: bool,
+    /// Camera-space distance between two OPEN palms (both hands tracked,
+    /// both OpenPalm) — drives two-palm camera zoom (CSL spec §5).
+    pub palm_spread: Option<f32>,
     pinch_latched: bool,
     candidate: HandPose,
     candidate_frames: u8,
@@ -156,6 +159,7 @@ impl HandsState {
             tracking: false,
             hands: 0,
             camera_enabled: false,
+            palm_spread: None,
             pinch_latched: false,
             candidate: HandPose::Rest,
             candidate_frames: 0,
@@ -220,6 +224,24 @@ impl HandsState {
         self.pinch = ((self.pinch_exit * 1.6 - pinch_d)
             / (self.pinch_exit * 1.6 - self.pinch_enter))
             .clamp(0.0, 1.0);
+
+        // Two-palm spread (CSL §5): both hands present and open.
+        self.palm_spread = None;
+        if hands >= 2 && data.len() >= 126 {
+            let lm2 = &data[63..126];
+            if classify(lm, self.pinch_enter) == HandPose::OpenPalm
+                && classify(lm2, self.pinch_enter) == HandPose::OpenPalm
+            {
+                let centroid = |l: &[f32]| {
+                    let ids = [WRIST, 5, 9, 13, 17];
+                    let (sx, sy) = ids
+                        .iter()
+                        .fold((0.0, 0.0), |a, &i| (a.0 + pt(l, i).0, a.1 + pt(l, i).1));
+                    (sx / 5.0, sy / 5.0)
+                };
+                self.palm_spread = Some(dist(centroid(lm), centroid(lm2)));
+            }
+        }
 
         // Cursor anchor (spec §2.1): always the palm centroid — wrist + the
         // four MCP knuckles, joints that barely move under finger flexion.

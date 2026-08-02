@@ -12,6 +12,17 @@ Entry format:
 
 ---
 
+## [2026-08-02] — M9 lands: the Voice OS is real; M10 begins: the face layer
+### Code
+- **Continuous voice (M9.4):** the Whisper engine no longer stops at utterance end — buffers flush to the transcriber and the mic keeps rolling until the RECORD sign or the widget stops it; capture auto-starts at boot when the mic was granted at onboarding.
+- **Voice Kit (M9.4–5):** new top-right widget — pulsing `● REC` chip (never hidden while live), expandable live transcript with ⌘-accented commands, search over all `/voice` history, →note conversion (commands become a checklist); sessions persist as `/voice/<date>/s<id>.json`, rewritten per utterance.
+- **Command stream (M9.6):** ☝ held still 0.8 s while capturing arms ⌘ (new COMMAND sign in the engine, tested); the next utterance routes through the palette brain and reaches the assistant wrapped in the **context envelope** (M9.7: stage summary + open windows).
+- **AI web access (M9.8, ABI 1.11):** `WebFetch` syscall + `WebResult` event; the tool loop suspends on `web_search` (Wikipedia OpenSearch) / `web_fetch` (Jina Reader) and resumes when the body lands; `web_open` drives the visible Browser window. NetLlm gates it.
+- **Two-palm zoom (M9.9 partial):** both hands open → spreading/closing the palms zooms the stage camera.
+- **Face layer (M10, opt-in):** Settings → Face enables the MediaPipe FaceLandmarker beside the hand model in the same worker — only eyeBlink blendshape scores leave it, never pixels; the kernel's blink FSM turns a quick double-blink into a click at the pointer (accessibility). 42 native tests total.
+### Specs
+- [[Todo]] M9 tasks 3–8 done, 9 partial; M10 face plumbing + double-blink done.
+
 ## [2026-08-02] — One cursor, pinch owns objects, fist owns the space
 ### Code
 - **✊/👍 confusion fixed** (user-reported "almost always thumbs-up"): a fist's wrapped thumb passed the weak extension check and fell into the thumbs branch. Thumbs-up/down now require a LONG (>1.35× palm) and clearly VERTICAL thumb; anything less is Grab. 2 new classifier tests.

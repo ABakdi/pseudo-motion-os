@@ -8,6 +8,7 @@
 pub mod app_host;
 pub mod apps;
 pub mod cursor;
+pub mod voicekit;
 pub mod hand_tracker;
 pub mod palette;
 pub mod shell;

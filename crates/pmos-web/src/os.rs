@@ -28,6 +28,10 @@ pub fn pmos_launch(permissions_json: String) {
         return;
     }
     log::info!("launch requested, permissions: {permissions_json}");
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&permissions_json) {
+        let mic = v["microphone"].as_bool().unwrap_or(false);
+        MIC_GRANTED.with(|m| *m.borrow_mut() = mic);
+    }
 
     let doc = web_sys::window()
         .and_then(|w| w.document())
@@ -68,6 +72,9 @@ thread_local! {
     // same frame, and the error reason must not be lost.
     static VOICE_STATUS: RefCell<Vec<(bool, bool, String)>> = const { RefCell::new(Vec::new()) };
     static LLM_TIER: RefCell<Option<u8>> = const { RefCell::new(None) };
+    static WEB_RESULTS: RefCell<Vec<(u32, bool, String)>> = const { RefCell::new(Vec::new()) };
+    static FACE_FRAME: RefCell<Option<(f32, f32)>> = const { RefCell::new(None) };
+    static MIC_GRANTED: RefCell<bool> = const { RefCell::new(false) };
     static VOICE_TRANSCRIPTS: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
     static VFS_LOADED: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
     static VFS_DIRS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
@@ -174,6 +181,19 @@ pub fn pmos_llm_tier(tier: u8) {
     LLM_TIER.with(|t| *t.borrow_mut() = Some(tier.min(2)));
 }
 
+/// Called by llm.js (pmosWeb) when a WebFetch completes (ABI 1.11).
+#[wasm_bindgen]
+pub fn pmos_web_result(id: u32, ok: bool, body: String) {
+    WEB_RESULTS.with(|q| q.borrow_mut().push((id, ok, body)));
+}
+
+/// Called by gesture.js with face blendshape scores (M10, opt-in):
+/// eyeBlinkLeft, eyeBlinkRight. Landmarks/blendshapes only — never pixels.
+#[wasm_bindgen]
+pub fn pmos_face_frame(blink_l: f32, blink_r: f32) {
+    FACE_FRAME.with(|f| *f.borrow_mut() = Some((blink_l, blink_r)));
+}
+
 /// Preview pixels for the Hand Tracker viewer (RGBA, mirrored). These go
 /// straight into an egui texture for the shell — deliberately NEVER through
 /// the kernel (Hand Gestures spec §7 privacy boundary).
@@ -272,6 +292,48 @@ fn apply_voice_config(kernel: &pmos_kernel::Kernel) {
     }
 }
 
+/// Dispatch one WebFetch to llm.js's pmosWeb bridge.
+fn dispatch_web_fetch(id: u32, url: &str) {
+    let Some(win) = web_sys::window() else { return };
+    let Ok(g) = js_sys::Reflect::get(&win, &JsValue::from_str("pmosWeb")) else {
+        return;
+    };
+    if let Ok(f) = js_sys::Reflect::get(&g, &JsValue::from_str("fetch")) {
+        if let Some(f) = f.dyn_ref::<js_sys::Function>() {
+            let _ = f.call2(&g, &JsValue::from_f64(id as f64), &JsValue::from_str(url));
+        }
+    }
+}
+
+/// Push face-tracking preferences (/settings/face.json) to gesture.js —
+/// the face model only runs when the user opts in (Settings → Face).
+fn apply_face_config(kernel: &pmos_kernel::Kernel) {
+    let enabled = kernel
+        .vfs
+        .read("/settings/face.json")
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|v| v.get("enabled").and_then(|e| e.as_bool()))
+        .unwrap_or(false);
+    let Some(win) = web_sys::window() else { return };
+    let Ok(g) = js_sys::Reflect::get(&win, &JsValue::from_str("pmosGestures")) else {
+        return;
+    };
+    if g.is_undefined() {
+        return;
+    }
+    if let Ok(f) = js_sys::Reflect::get(&g, &JsValue::from_str("configure")) {
+        if let Some(f) = f.dyn_ref::<js_sys::Function>() {
+            let opts = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(
+                &opts,
+                &JsValue::from_str("face"),
+                &JsValue::from_bool(enabled),
+            );
+            let _ = f.call1(&g, &opts);
+        }
+    }
+}
+
 /// Apply the kernel voice directive to speech.js (start/stop capture).
 fn apply_voice_directive(capture: bool) {
     let Some(win) = web_sys::window() else { return };
@@ -349,6 +411,8 @@ struct OsApp {
     last_mouse_move: f64,
     /// 👌 pinch routing: Ui click/drag, or Prop (object grabbed by pinch).
     pinch_mode: GrabMode,
+    /// One-shot: auto-start voice capture once the shell exists.
+    voice_autostarted: bool,
     /// Last hand cursor position forwarded to egui (sub-point jitter from a
     /// resting hand would otherwise fight the mouse for the pointer).
     last_hand_move: Option<[f32; 2]>,
@@ -407,6 +471,7 @@ impl OsApp {
             shift_down: false,
             last_mouse_move: -10.0,
             pinch_mode: GrabMode::None,
+            voice_autostarted: false,
             last_hand_move: None,
         }
     }
@@ -495,6 +560,28 @@ impl OsApp {
             self.applied_voice_generation = self.kernel.voice_directives.generation;
             apply_voice_directive(self.kernel.voice_directives.capture);
         }
+        // Always-on voice (Voice Kit spec §2): if the mic was granted at
+        // onboarding, capture starts at boot — the RECORD sign pauses it.
+        if !self.voice_autostarted && self.shell.is_some() {
+            self.voice_autostarted = true;
+            if MIC_GRANTED.with(|m| *m.borrow()) {
+                self.kernel.voice_directives.capture = true;
+                self.kernel.voice_directives.generation += 1;
+                log::info!("voice capture auto-started (mic granted at onboarding)");
+            }
+        }
+        // Web fetches for the AI tools (ABI 1.11).
+        for (id, url) in std::mem::take(&mut self.kernel.web_pending) {
+            dispatch_web_fetch(id, &url);
+        }
+        for (id, ok, body) in WEB_RESULTS.with(|q| std::mem::take(&mut *q.borrow_mut())) {
+            self.kernel.web_result(id, ok, body);
+        }
+        // Face layer (M10, opt-in): blendshapes → kernel; double-blink
+        // injects a click at the current pointer (accessibility).
+        if let Some((bl, br)) = FACE_FRAME.with(|f| f.borrow_mut().take()) {
+            self.kernel.face_frame(bl, br, now);
+        }
         // Machine-probed LLM tier: surface via /sys/llm_tier, and — when the
         // user never saved an AI config — fit the default model to the tier.
         if let Some(tier) = LLM_TIER.with(|t| t.borrow_mut().take()) {
@@ -529,6 +616,7 @@ impl OsApp {
             self.kernel.vfs.ready = true;
             log::info!("vfs ready (persistent: {ok})");
             apply_voice_config(&self.kernel);
+            apply_face_config(&self.kernel);
         }
         for op in std::mem::take(&mut self.kernel.vfs.dirty) {
             use pmos_kernel::vfs::VfsOp;
@@ -536,6 +624,9 @@ impl OsApp {
                 VfsOp::Write(path, bytes) => {
                     if path == "/settings/voice.json" {
                         apply_voice_config(&self.kernel);
+                    }
+                    if path == "/settings/face.json" {
+                        apply_face_config(&self.kernel);
                     }
                     let arr = js_sys::Array::of2(
                         &JsValue::from_str(&path),
@@ -610,6 +701,23 @@ impl OsApp {
         // Hand pointer intents → synthetic egui pointer events (M4). Grab is
         // routed by context: over UI it drags like a primary press (windows
         // move by titlebar); over empty stage it orbits the camera.
+        if self.kernel.face_click_pending {
+            self.kernel.face_click_pending = false;
+            if let Some(pos) = self.egui_ctx.pointer_latest_pos() {
+                raw_input.events.push(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                });
+                raw_input.events.push(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::default(),
+                });
+            }
+        }
         use pmos_kernel::input::fusion::HandIntent;
         for intent in self.kernel.input.fusion.take_intents() {
             let ev = &mut raw_input.events;

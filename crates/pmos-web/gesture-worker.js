@@ -70,7 +70,9 @@ async function reconfigure(opts) {
 (async () => {
   building = true;
   try {
-    const { FilesetResolver, HandLandmarker } = await import(`${VISION}/vision_bundle.mjs`);
+    const mod = await import(`${VISION}/vision_bundle.mjs`);
+    const { FilesetResolver, HandLandmarker } = mod;
+    FaceLandmarkerClass = mod.FaceLandmarker;
     fileset = await FilesetResolver.forVisionTasks(`${VISION}/wasm`);
     makeLandmarker = (f, o) => HandLandmarker.createFromOptions(f, o);
     await build();
@@ -86,8 +88,43 @@ async function reconfigure(opts) {
   }
 })();
 
+// ---- face layer (M10, opt-in from Settings → Face) ----
+// Blendshapes only ever leave this worker — never pixels.
+let FaceLandmarkerClass = null;
+let faceLandmarker = null;
+let faceWanted = false;
+let faceBuilding = false;
+
+async function ensureFace() {
+  if (faceLandmarker || faceBuilding || !faceWanted || !fileset || !FaceLandmarkerClass) return;
+  faceBuilding = true;
+  try {
+    faceLandmarker = await FaceLandmarkerClass.createFromOptions(fileset, {
+      baseOptions: {
+        modelAssetPath:
+          "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+        delegate: "GPU",
+      },
+      runningMode: "VIDEO",
+      numFaces: 1,
+      outputFaceBlendshapes: true,
+    });
+    console.log("[pmos gesture-worker] face landmarker ready");
+  } catch (err) {
+    console.warn("[pmos gesture-worker] face model failed:", err);
+    faceWanted = false;
+  }
+  faceBuilding = false;
+}
+
 onmessage = async (e) => {
   const m = e.data;
+  if (m.type === "face") {
+    faceWanted = !!m.enable;
+    if (!faceWanted) faceLandmarker = null;
+    else ensureFace();
+    return;
+  }
   if (m.type === "configure") {
     if (fileset || building) reconfigure(m);
     return;
@@ -113,6 +150,18 @@ onmessage = async (e) => {
           data[o + 2] = p.z;
         })
       );
+    }
+    if (faceWanted && faceLandmarker) {
+      const fr = faceLandmarker.detectForVideo(m.bitmap, m.ts);
+      const cats = fr.faceBlendshapes?.[0]?.categories;
+      if (cats) {
+        const get = (n) => cats.find((c) => c.categoryName === n)?.score ?? 0;
+        postMessage({
+          type: "face",
+          blinkL: get("eyeBlinkLeft"),
+          blinkR: get("eyeBlinkRight"),
+        });
+      }
     }
   } catch (err) {
     console.warn("[pmos gesture-worker] detect failed:", err);

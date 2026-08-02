@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 10);
+pub const ABI_VERSION: (u16, u16) = (1, 11);
 
 // ---------- handles ----------
 
@@ -191,6 +191,12 @@ pub enum Syscall {
         intensity: f32,
         ambient: f32,
     },
+    /// Fetch a URL through the platform (ABI 1.11) — used by the AI web
+    /// tools. Replies `Bytes(request id)`; the body arrives later as a
+    /// `WebResult` event. Requires `NetLlm`.
+    WebFetch {
+        url: String,
+    },
 }
 
 /// Gesture-pipeline tuning (Hand Gestures spec §6 defaults).
@@ -270,6 +276,9 @@ pub enum CslSign {
     Command,
     /// ✋ push toward camera: Esc-equivalent.
     Cancel,
+    /// Both eyes blink twice quickly (face layer, M10): accessibility
+    /// click at the cursor — opt-in via Settings → Face.
+    DoubleBlink,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,6 +286,13 @@ pub enum KernelEvent {
     /// A CSL motion sign completed (ABI 1.10) — sent to the shell.
     Sign {
         sign: CslSign,
+    },
+    /// A `WebFetch` finished (ABI 1.11). `body` is text, truncated by the
+    /// platform to a sane size.
+    WebResult {
+        id: u32,
+        ok: bool,
+        body: String,
     },
     PointerMove {
         pos: [f32; 2],

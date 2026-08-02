@@ -56,11 +56,14 @@
         const m = e.data;
         if (m.type === "ready") {
           running = true;
+          if (faceEnabled) worker.postMessage({ type: "face", enable: true });
           window.wasmBindings.pmos_camera_status(true);
           pump();
         } else if (m.type === "hands") {
           busy = false;
           window.wasmBindings.pmos_hands_frame(m.data, m.hands);
+        } else if (m.type === "face") {
+          window.wasmBindings.pmos_face_frame(m.blinkL, m.blinkR);
         } else if (m.type === "error") {
           console.error("[pmos gestures] worker:", m.message);
           window.wasmBindings.pmos_camera_status(
@@ -108,8 +111,15 @@
     window.wasmBindings.pmos_camera_frame(new Uint8Array(px.data.buffer), PREVIEW_W, PREVIEW_H);
   }
 
+  let faceEnabled = false;
+
   // Applied by the platform glue from kernel directives (ABI 1.2).
   function configure(opts) {
+    if (typeof opts.face === "boolean") {
+      faceEnabled = opts.face;
+      worker?.postMessage({ type: "face", enable: faceEnabled });
+      if (opts.streamFeed === undefined) return; // face-only update
+    }
     streamFeed = !!opts.streamFeed;
     // Rebuild the landmarker ONLY when worker-side tuning really changed —
     // viewer open/close and feed toggles must never interrupt tracking.

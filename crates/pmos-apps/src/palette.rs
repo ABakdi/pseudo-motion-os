@@ -350,6 +350,13 @@ impl Palette {
         }
     }
 
+    /// Route an ambient voice COMMAND (Voice Kit ⌘): opens the palette so
+    /// the user sees what fired, then runs the normal spoken routing.
+    pub fn run_voice_command(&mut self, text: String) -> Vec<PaletteOutcome> {
+        self.open = true;
+        self.route(text, true)
+    }
+
     /// One brain for typed and spoken input. `voice` changes only the
     /// fallback: unrecognized speech is conversational, so it goes to the
     /// assistant instead of an "unknown command" shrug.

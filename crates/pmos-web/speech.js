@@ -74,7 +74,9 @@
           pendingJob = null;
         } else if (m.final) {
           if (m.text) transcript(m.text, true);
-          status(false, true, m.text ? "" : "no speech heard");
+          // Continuous: capture is still rolling — only report stopped
+          // when the session actually ended.
+          if (!active) status(false, true, m.text ? "" : "no speech heard");
         } else if (active && m.text) {
           transcript(m.text, false);
         }
@@ -143,16 +145,17 @@
   }
 
   function endUtterance(gotSpeech) {
-    active = false;
-    stopMic();
+    // CONTINUOUS mode (Voice Kit): an utterance ending does NOT stop the
+    // mic — the buffer flushes to the transcriber and capture keeps rolling
+    // until stop() (the RECORD sign / widget click).
     if (gotSpeech) {
       log("utterance ended, transcribing", (chunksLen / captureRate).toFixed(1) + "s of audio");
-      transcribe(true); // final status arrives with the result
-      status(true, true, workerReady ? "transcribing…" : "waiting for the speech model…");
-    } else {
-      log("no speech detected");
-      status(false, true, "no speech heard");
+      transcribe(true);
     }
+    chunks = [];
+    chunksLen = 0;
+    speaking = false;
+    sessionT0 = nowS();
   }
 
   function onFrame(frame) {
@@ -172,7 +175,12 @@
       lastVoiceT = t;
     }
     if (!speaking) {
-      if (t - sessionT0 > NO_SPEECH_S) endUtterance(false);
+      if (t - sessionT0 > NO_SPEECH_S) {
+        // Nothing said: drop the silence buffer, keep listening.
+        chunks = [];
+        chunksLen = 0;
+        sessionT0 = t;
+      }
       return;
     }
     if (rms < SILENCE_RMS && t - lastVoiceT > SILENCE_END_S) {
