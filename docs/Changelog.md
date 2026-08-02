@@ -12,6 +12,13 @@ Entry format:
 
 ---
 
+## [2026-08-02] — Stage interaction unbroken: the zero viewport and the poisoned pointer
+### Code
+Two root causes found by live-debugging with console instrumentation (user-reported: can't grab objects, stage controls dead):
+- **`window.inner_size()` returns 0×0 inside web event handlers** — the pick ray for grabbing was built with a zero viewport → NaN ray → **every prop grab has silently missed since M7** (the native tests passed because they cast rays directly, never through screen coordinates). All viewport math now derives from the canvas client size (`viewport_pts()`), which is the truth on web.
+- **The shared egui pointer poisoned mouse routing**: the hand cursor drives the same egui pointer, so a tracked hand hovering any UI — or holding a half-closed pinch — made egui consume every mouse press; orbit/zoom/pan went dead whenever the camera saw a hand. Stage routing now hit-tests the event's own position (`layer_id_at`), decoupling mouse and hand; an orbit in progress also no longer stalls when crossing a window.
+- Verified via console logs: presses on empty stage route to Orbit with a real viewport. Grab/zoom/pan feel needs the user's hands+mouse.
+
 ## [2026-08-01] — Deferred-item sweep + the first CSL sign is live
 ### Code
 - **Conjure widgets (M5 deferral):** `dropdown` (bind + literal/expression options) and `list_view` (items list + `template` string with `item`/`i` locals, optional `on_remove` handler receiving them) — validator whitelist, App Host rendering, App Smith contract updated.

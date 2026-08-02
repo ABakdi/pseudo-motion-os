@@ -343,7 +343,7 @@ struct OsApp {
     last_hand_move: Option<[f32; 2]>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum GrabMode {
     None,
     Ui,
@@ -354,6 +354,18 @@ enum GrabMode {
 }
 
 impl OsApp {
+
+    /// Viewport in egui points. NEVER window.inner_size() — on web that can
+    /// report 0×0 in event handlers (the canvas is CSS-sized), which fed a
+    /// zero viewport into ray picking and silently broke every prop grab
+    /// since M7 (user-reported). The canvas client size is the truth.
+    fn viewport_pts(&self) -> [f32; 2] {
+        self.canvas
+            .as_ref()
+            .map(|c| [c.client_width() as f32, c.client_height() as f32])
+            .filter(|v| v[0] > 0.0 && v[1] > 0.0)
+            .unwrap_or([1.0, 1.0])
+    }
     fn new() -> Self {
         let mut kernel = Kernel::new();
         if let Some(json) = local_storage().and_then(|s| s.get_item(AI_CFG_KEY).ok().flatten()) {
@@ -397,6 +409,7 @@ impl OsApp {
             log::info!("gfx online — render graph live");
             call_storage("loadAll", &js_sys::Array::new());
         }
+        let viewport = self.viewport_pts();
         let (Some(window), Some(egui_state)) = (&self.window, &mut self.egui_state) else {
             return;
         };
@@ -427,11 +440,6 @@ impl OsApp {
 
         // Drain the gesture bridge into the kernel input pipeline.
         let now = now_secs();
-        let ppp = self.egui_ctx.pixels_per_point();
-        let viewport = [
-            window.inner_size().width as f32 / ppp,
-            window.inner_size().height as f32 / ppp,
-        ];
         if let Some((enabled, reason)) = CAMERA_STATUS.with(|s| s.borrow_mut().take()) {
             self.kernel.set_camera_status(enabled, reason);
         }
@@ -602,13 +610,17 @@ impl OsApp {
                         modifiers: egui::Modifiers::default(),
                     });
                 }
-                HandIntent::Scroll { pos, dy } if !self.egui_ctx.is_pointer_over_egui() => {
+                HandIntent::Scroll { pos, dy }
+                    if self
+                        .egui_ctx
+                        .layer_id_at(egui::pos2(pos[0], pos[1]))
+                        .is_none() =>
+                {
                     // ✌ over the empty stage zooms the camera; over UI it
                     // scrolls (modality parity with the mouse wheel).
                     if let Some(gfx) = self.kernel.gfx.as_mut() {
                         gfx.camera.zoom(dy * 0.06);
                     }
-                    let _ = pos;
                 }
                 HandIntent::Scroll { pos, dy } => {
                     ev.push(egui::Event::PointerMoved(p(pos)));
@@ -622,7 +634,7 @@ impl OsApp {
                 }
                 HandIntent::GrabStart(pos) => {
                     // Decide once per grab: UI drag, physics prop, or orbit.
-                    if self.egui_ctx.is_pointer_over_egui() {
+                    if self.egui_ctx.layer_id_at(p(pos)).is_some() {
                         self.hand_grab_mode = GrabMode::Ui;
                         ev.push(egui::Event::PointerMoved(p(pos)));
                         ev.push(egui::Event::PointerButton {
@@ -776,15 +788,27 @@ impl ApplicationHandler for OsApp {
                 }
             }
             WindowEvent::CloseRequested => event_loop.exit(),
-            // Stage camera controls — only when egui didn't claim the input
-            // (UI spec §3.4).
+            // Stage camera controls. Routing hit-tests the MOUSE's own
+            // position (layer_id_at) instead of egui's shared pointer state:
+            // the hand cursor also drives that pointer, and a tracked hand
+            // hovering any UI (or holding a pinch) used to make egui consume
+            // every mouse press — stage controls went dead (user-reported).
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
                 ..
             } => {
                 self.mouse_left_down = state == ElementState::Pressed;
-                if state == ElementState::Pressed && !egui_wants {
+                let ppp = self.egui_ctx.pixels_per_point();
+                let pos_pts = self
+                    .last_cursor
+                    .map(|(x, y)| [x / ppp, y / ppp])
+                    .unwrap_or([0.0, 0.0]);
+                let on_ui = self
+                    .egui_ctx
+                    .layer_id_at(egui::pos2(pos_pts[0], pos_pts[1]))
+                    .is_some();
+                if state == ElementState::Pressed && !on_ui {
                     let t = now_secs();
                     if t - self.last_press < 0.35 {
                         if let Some(gfx) = self.kernel.gfx.as_mut() {
@@ -793,15 +817,7 @@ impl ApplicationHandler for OsApp {
                     }
                     self.last_press = t;
                     // Modality parity: the mouse can grab props too (UI §3.2).
-                    let ppp = self.egui_ctx.pixels_per_point();
-                    let viewport = [
-                        window.inner_size().width as f32 / ppp,
-                        window.inner_size().height as f32 / ppp,
-                    ];
-                    let pos_pts = self
-                        .last_cursor
-                        .map(|(x, y)| [x / ppp, y / ppp])
-                        .unwrap_or([0.0, 0.0]);
+                    let viewport = self.viewport_pts();
                     self.mouse_mode = if self.shift_down {
                         GrabMode::Pan
                     } else if self.kernel.try_grab_prop(pos_pts, viewport) {
@@ -809,6 +825,10 @@ impl ApplicationHandler for OsApp {
                     } else {
                         GrabMode::Orbit
                     };
+                    log::debug!(
+                        "mouse press at {pos_pts:?} vp {viewport:?} → {:?}",
+                        self.mouse_mode
+                    );
                 } else if state == ElementState::Released {
                     if self.mouse_mode == GrabMode::Prop {
                         self.kernel.release_grab();
@@ -822,7 +842,16 @@ impl ApplicationHandler for OsApp {
                 button: MouseButton::Middle,
                 ..
             } => {
-                self.mouse_mode = if state == ElementState::Pressed && !egui_wants {
+                let on_ui = self
+                    .last_cursor
+                    .map(|(x, y)| {
+                        let ppp = self.egui_ctx.pixels_per_point();
+                        self.egui_ctx
+                            .layer_id_at(egui::pos2(x / ppp, y / ppp))
+                            .is_some()
+                    })
+                    .unwrap_or(false);
+                self.mouse_mode = if state == ElementState::Pressed && !on_ui {
                     GrabMode::Pan
                 } else {
                     GrabMode::None
@@ -834,7 +863,9 @@ impl ApplicationHandler for OsApp {
             WindowEvent::CursorMoved { position, .. } => {
                 let pos = (position.x as f32, position.y as f32);
                 match self.mouse_mode {
-                    GrabMode::Orbit if !egui_wants => {
+                    // Once an orbit began on empty stage it follows until
+                    // release — crossing over a window must not stall it.
+                    GrabMode::Orbit => {
                         if let (Some(last), Some(gfx)) =
                             (self.last_cursor, self.kernel.gfx.as_mut())
                         {
@@ -850,10 +881,7 @@ impl ApplicationHandler for OsApp {
                     }
                     GrabMode::Prop => {
                         let ppp = self.egui_ctx.pixels_per_point();
-                        let viewport = [
-                            window.inner_size().width as f32 / ppp,
-                            window.inner_size().height as f32 / ppp,
-                        ];
+                        let viewport = self.viewport_pts();
                         self.kernel.move_grab([pos.0 / ppp, pos.1 / ppp], viewport);
                     }
                     _ => {}
@@ -864,7 +892,16 @@ impl ApplicationHandler for OsApp {
                     .pointer_moved([pos.0, pos.1], pmos_abi::InputSource::Mouse);
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                if !egui_wants {
+                let on_ui = self
+                    .last_cursor
+                    .map(|(x, y)| {
+                        let ppp = self.egui_ctx.pixels_per_point();
+                        self.egui_ctx
+                            .layer_id_at(egui::pos2(x / ppp, y / ppp))
+                            .is_some()
+                    })
+                    .unwrap_or(false);
+                if !on_ui {
                     let dy = match delta {
                         MouseScrollDelta::LineDelta(_, y) => y,
                         MouseScrollDelta::PixelDelta(p) => p.y as f32 / 60.0,
