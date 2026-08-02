@@ -12,6 +12,13 @@ Entry format:
 
 ---
 
+## [2026-08-01] — Deferred-item sweep + the first CSL sign is live
+### Code
+- **Conjure widgets (M5 deferral):** `dropdown` (bind + literal/expression options) and `list_view` (items list + `template` string with `item`/`i` locals, optional `on_remove` handler receiving them) — validator whitelist, App Host rendering, App Smith contract updated.
+- **/sys/processes + /sys/ai/log (M6 deferral):** live process table refreshed on register/kill; a 200-line AI activity ring (prompts in, replies done) — both `cat`-able in the terminal and visible in Files; `/sys/ai` is a real synthetic directory.
+- **Whisper model size (voice deferral):** Settings → Voice picks tiny/base/small (~40/80/250 MB), persisted to `/settings/voice.json`; the platform reconfigures the speech engine (warm worker torn down, next session loads the new model).
+- **M9 task 3 (partial): the CSL sign engine + RECORD** — `input/signs.rs`: per-sign FSMs over the debounced pose stream with the spec's Midas guards (0.3 s entry hold, 0.8 s squeeze window, 0.5 s refractory, Rest tolerated mid-squeeze, tracking loss aborts); ✋→✊ RECORD toggles voice capture with toasts both ways; new `Sign{CslSign}` event (ABI 1.10). 5 native tests (fire, too-short, expired, abort+refractory, loss). COMMAND/CANCEL follow with their milestones.
+
 ## [2026-08-01] — M9 tasks 1–2: the browser finally works; the Launcher is gone
 ### Code
 - **Browser root cause** (live-debugged in Chrome against the deployed site): `windows()` computed the Browser's content rect into a local that was dropped — `self.browser_view` stayed `None`, the platform iframe never got a URL or rect, broken since M8 for every site. One assignment fixes it. Verified live: Wikipedia renders inside the window, scrolls natively, and the iframe tracks the window as it moves.
