@@ -80,6 +80,20 @@ impl VoiceKit {
         }
     }
 
+    /// The last few non-command lines — AI context (Voice Kit spec §5).
+    pub fn recent_lines(&self, n: usize) -> Vec<String> {
+        self.segments
+            .iter()
+            .rev()
+            .filter(|(_, _, cmd)| !cmd)
+            .take(n)
+            .map(|(_, t, _)| t.clone())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
+    }
+
     /// Search all persisted sessions for a substring (case-insensitive).
     fn run_search(&mut self, kernel: &mut dyn KernelApi, pid: Pid) {
         self.results.clear();

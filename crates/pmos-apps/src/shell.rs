@@ -262,9 +262,15 @@ impl Shell {
             .filter(|a| a.open)
             .map(|a| a.state.kind.title())
             .collect();
+        let recent = self.voicekit.recent_lines(3);
         format!(
-            "[context] stage: {stage} · open windows: {} [/context]",
-            if windows.is_empty() { "none".into() } else { windows.join(", ") }
+            "[context] stage: {stage} · open windows: {}{} [/context]",
+            if windows.is_empty() { "none".into() } else { windows.join(", ") },
+            if recent.is_empty() {
+                String::new()
+            } else {
+                format!(" · they just said: \"{}\"", recent.join(" / "))
+            }
         )
     }
 

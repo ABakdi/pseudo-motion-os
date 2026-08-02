@@ -170,10 +170,22 @@ impl Kernel {
         self.last_hand2 = hand2.map(|(p, c)| (p, c));
 
         // CSL sign recognition rides the same debounced pose stream.
+        // Face-anchored COMMAND (CSL §6): when the face is tracked, the ☝
+        // hold must happen NEAR THE CHIN (the true ASL anchor); without face
+        // data it works anywhere (fallback).
+        let near_face = self.face.chin.and_then(|(chin, t)| {
+            if now - t > 1.0 {
+                return None; // stale face data → fallback
+            }
+            let c = self.input.hands.palm_centroid;
+            let d = ((c.0 - chin.0).powi(2) + (c.1 - chin.1).powi(2)).sqrt();
+            Some(d < 0.28)
+        });
         if let Some(sign) = self.input.signs.step(
             self.input.hands.pose,
             self.input.hands.cursor,
             self.input.hands.palm_scale,
+            near_face,
             self.input.hands.tracking,
             now,
         ) {
@@ -210,7 +222,7 @@ impl Kernel {
                 // half-formed sign aborts too.
                 let pos = self.input.hands.cursor.unwrap_or([0.0, 0.0]);
                 self.input.fusion.lost(pos);
-                let _ = self.input.signs.step(pmos_abi::HandPose::Rest, None, 0.1, false, now);
+                let _ = self.input.signs.step(pmos_abi::HandPose::Rest, None, 0.1, None, false, now);
             }
             self.publish_hand_state();
         }
@@ -377,11 +389,26 @@ struct FaceState {
     blink_times: Vec<f64>,
     jaw_since: Option<f64>,
     jaw_fired: bool,
+    /// Chin landmark (camera space) + timestamp — anchors COMMAND (CSL §6).
+    chin: Option<((f32, f32), f64)>,
 }
 
 impl Kernel {
-    /// Blendshape frame from the platform: blinks + jawOpen (M10).
-    pub fn face_frame(&mut self, blink_l: f32, blink_r: f32, jaw: f32, now: f64) {
+    /// Face frame from the platform: blinks, jawOpen, chin landmark (M10).
+    pub fn face_frame(
+        &mut self,
+        blink_l: f32,
+        blink_r: f32,
+        jaw: f32,
+        chin_x: f32,
+        chin_y: f32,
+        now: f64,
+    ) {
+        self.face.chin = if chin_x >= 0.0 {
+            Some(((chin_x, chin_y), now))
+        } else {
+            None
+        };
         // Mouth held wide open ~0.6 s = hands-free voice toggle (the face
         // layer's RECORD equivalent). Must close the mouth to re-arm.
         if jaw > 0.55 {

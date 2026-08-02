@@ -143,6 +143,9 @@ pub struct HandsState {
     /// Second hand, when present: (raw pose, camera-space palm centroid).
     /// Drives the non-dominant property controls (CSL spec §5).
     pub hand2: Option<(HandPose, (f32, f32))>,
+    /// Primary-hand palm centroid in camera space (pre-mirror) — compared
+    /// against the face's chin for face-anchored signs (CSL spec §6).
+    pub palm_centroid: (f32, f32),
     pinch_latched: bool,
     candidate: HandPose,
     candidate_frames: u8,
@@ -169,6 +172,7 @@ impl HandsState {
             palm_spread: None,
             palm_scale: 0.1,
             hand2: None,
+            palm_centroid: (0.5, 0.5),
             pinch_latched: false,
             candidate: HandPose::Rest,
             candidate_frames: 0,
@@ -273,6 +277,7 @@ impl HandsState {
             (acc.0 + pt(lm, i).0, acc.1 + pt(lm, i).1)
         });
         let anchor = (sx / 5.0, sy / 5.0);
+        self.palm_centroid = anchor;
         // Mirror x (webcam shows a mirror image), map through the control box.
         let nx = ((1.0 - anchor.0) - BOX_X.0) / (BOX_X.1 - BOX_X.0);
         let ny = (anchor.1 - BOX_Y.0) / (BOX_Y.1 - BOX_Y.0);

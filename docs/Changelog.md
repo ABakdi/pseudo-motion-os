@@ -12,6 +12,15 @@ Entry format:
 
 ---
 
+## [2026-08-02] — Polish sweep: canvas, chin-anchored ⌘, context menus, richer context
+### Code
+- **Conjure `canvas`** — the last v1 widget: a fixed-size surface drawn from draw-op maps (circle/rect/line/text, hex colors) with `on_pointer` handing px/py locals to a handler; validator, App Host, and the App Smith contract updated. The v1 widget catalog is complete.
+- **Chin-anchored COMMAND (CSL §6)**: the gesture worker now ships the chin landmark (a single point — still never pixels); with face tracking enabled, ☝-hold only arms ⌘ near the chin, matching the real ASL location; without face data it works anywhere.
+- **Context envelope grown**: voice commands now also carry the last 3 transcript lines — "what did I just say?" and pronoun references resolve.
+- **Files context menus** (UI §3.3): right-click any entry — Open/Launch/Preview/Copy path/Delete — in both grid and list views.
+- **Terminal `voice <query>`** searches the persisted transcripts; help updated.
+- **Settings control map** rewritten to the current bindings (pinch=objects, fist=space, palm signs, ☝ ⌘, two-palm zoom).
+
 ## [2026-08-02] — Voice that discerns intent; the kit blends in; conjure truncation named
 ### Code
 - **Auto command detection** (user request: "it should know what to do"): spoken utterances that are self-evidently commands or questions — open/drop/make/search verbs, question words, or a trailing "?" — route automatically without ⌘ arming; plain statements stay transcript-only (anti-Midas holds).

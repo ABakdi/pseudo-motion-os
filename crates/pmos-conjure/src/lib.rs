@@ -35,6 +35,7 @@ pub const KNOWN_WIDGETS: &[&str] = &[
     "toggle",
     "dropdown",
     "list_view",
+    "canvas",
     "progress",
     "if",
 ];

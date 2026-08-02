@@ -65,7 +65,7 @@ The **focused object is context**: every AI command carries it (see [[Voice Kit#
 
 MediaPipe **FaceLandmarker** runs beside the HandLandmarker in the same tasks-vision worker: [478 3-D landmarks + 52 expression blendshapes + head transform](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker/web_js), landmarks-only across the kernel boundary (the [[Hand Gestures#7]] privacy rule extends unchanged: frames never leave the platform).
 
-- **Face-anchored signs**: COMMAND gains its true chin anchor; future signs can use mouth/brow regions.
+- **Face-anchored signs** *(implemented 2026-08-02)*: the worker ships the chin landmark; COMMAND arms only near the chin when the face is tracked (fallback: anywhere). Future signs can use mouth/brow regions the same way.
 - **Face gestures** (blendshape thresholds + debounce): brow-raise = confirm the focused dialog · double-blink = alternative click for motor accessibility · mouth-"O" = push-to-talk without hands. Each is opt-in in Settings (faces move constantly; defaults conservative).
 - **Gaze (experimental, honest limits)**: iris landmarks + head pose give **coarse gaze regions** (roughly which third/quadrant of the screen), not pixel accuracy, without per-user calibration. v1 use: *gaze assists focus* — look at a window and it soft-highlights; the hand cursor remains the precision instrument. A calibrated 5-point gaze cursor is a research track, not a promise.
 

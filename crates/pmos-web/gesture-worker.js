@@ -156,11 +156,14 @@ onmessage = async (e) => {
       const cats = fr.faceBlendshapes?.[0]?.categories;
       if (cats) {
         const get = (n) => cats.find((c) => c.categoryName === n)?.score ?? 0;
+        const chin = fr.faceLandmarks?.[0]?.[152]; // canonical chin point
         postMessage({
           type: "face",
           blinkL: get("eyeBlinkLeft"),
           blinkR: get("eyeBlinkRight"),
           jaw: get("jawOpen"),
+          chinX: chin ? chin.x : -1,
+          chinY: chin ? chin.y : -1,
         });
       }
     }

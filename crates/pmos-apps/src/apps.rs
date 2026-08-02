@@ -368,10 +368,62 @@ impl AppState {
 
         match verb {
             "help" => out.push(
-                "ls [dir] · cd <dir> · cat <file> · write <file> <text> · mkdir <dir> · rm <path> · apps · run <app> · fps · clear · about · > question"
+                "ls [dir] · cd <dir> · cat <file> · write <file> <text> · mkdir <dir> · rm <path> · apps · run <app> · voice <query> · fps · clear · about · > question"
                     .into(),
             ),
             "about" => out.push(format!("Pseudo Motion OS · ABI {:?}", pmos_abi::ABI_VERSION)),
+            "voice" => {
+                // Search the persisted voice transcripts (Voice Kit spec §4).
+                let needle = format!("{arg1} {rest}").trim().to_lowercase();
+                if needle.is_empty() {
+                    out.push("voice <query> — search your voice history".into());
+                } else {
+                    let mut hits = 0;
+                    if let Ok(Reply::Entries(days)) =
+                        kernel.syscall(pid, Syscall::FsList { path: "/voice".into() })
+                    {
+                        for day in days.iter().filter(|d| d.dir) {
+                            let dir = format!("/voice/{}", day.name);
+                            if let Ok(Reply::Entries(files)) =
+                                kernel.syscall(pid, Syscall::FsList { path: dir.clone() })
+                            {
+                                for f in files.iter().filter(|f| !f.dir) {
+                                    let path = format!("{dir}/{}", f.name);
+                                    if let Ok(Reply::Bytes(b)) =
+                                        kernel.syscall(pid, Syscall::FsRead { path })
+                                    {
+                                        if let Ok(v) =
+                                            serde_json::from_slice::<serde_json::Value>(&b)
+                                        {
+                                            for seg in
+                                                v["segments"].as_array().into_iter().flatten()
+                                            {
+                                                let text =
+                                                    seg["segments"].as_str().unwrap_or(
+                                                        seg["text"].as_str().unwrap_or(""),
+                                                    );
+                                                if text.to_lowercase().contains(&needle) {
+                                                    out.push(format!(
+                                                        "{} · {}",
+                                                        day.name, text
+                                                    ));
+                                                    hits += 1;
+                                                    if hits >= 20 {
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if hits == 0 {
+                        out.push("no matches".into());
+                    }
+                }
+            }
             "clear" => {
                 self.term_log.clear();
             }
@@ -568,6 +620,45 @@ impl AppState {
                 ));
             }
         }
+        // Right-click / middle-pinch context menu (UI spec §3.3).
+        resp.context_menu(|ui| {
+            if dir {
+                if ui.button("Open").clicked() {
+                    self.files_cwd = full.to_string();
+                    self.files_selected = None;
+                    self.files_preview = None;
+                    ui.close();
+                }
+            } else {
+                if full.ends_with(".conjure") && ui.button("▶ Launch").clicked() {
+                    if let Ok(Reply::Bytes(b)) =
+                        kernel.syscall(pid, Syscall::FsRead { path: full.into() })
+                    {
+                        *action = Some(AppAction::LaunchConjure(
+                            String::from_utf8_lossy(&b).to_string(),
+                        ));
+                    }
+                    ui.close();
+                }
+                if ui.button("Preview").clicked() {
+                    self.files_selected = Some(full.to_string());
+                    self.load_preview(kernel, pid, full);
+                    ui.close();
+                }
+            }
+            if ui.button("Copy path").clicked() {
+                ui.ctx().copy_text(full.to_string());
+                ui.close();
+            }
+            if !full.starts_with("/sys") && ui.button("🗑 Delete").clicked() {
+                let _ = kernel.syscall(pid, Syscall::FsDelete { path: full.into() });
+                if self.files_selected.as_deref() == Some(full) {
+                    self.files_selected = None;
+                    self.files_preview = None;
+                }
+                ui.close();
+            }
+        });
     }
 
     pub fn files_ui(
@@ -1222,8 +1313,9 @@ impl AppState {
         ui.add_space(10.0);
         ui.separator();
         ui.weak("Gestures are tuned in the Hand Tracker app.");
-        ui.weak("Stage: drag = orbit · wheel = zoom · shift/middle-drag = pan · Home/double-click = reset");
-        ui.weak("Hands: ✊ grab & throw (empty space = orbit) · ✌ over the stage = zoom");
+        ui.weak("Mouse: drag = orbit · wheel = zoom · shift/middle-drag = pan · click-drag object = grab · Home = reset");
+        ui.weak("Hands: 👌 click/grab objects (tap = select) · ✊ orbit + drag windows · ✌ scroll/zoom (edits selection) · two ✋ = zoom");
+        ui.weak("Signs: ✋ hold = voice on/off · ✋ push = cancel · ☝ hold (near chin) = ⌘ command · 👍/👎 = add/remove cube");
     }
 
     /// Settings → Voice: Whisper model size (deferred item from the voice

@@ -68,6 +68,7 @@ impl SignEngine {
         pose: HandPose,
         pos: Option<[f32; 2]>,
         scale: f32,
+        near_face: Option<bool>,
         tracking: bool,
         now: f64,
     ) -> Option<CslSign> {
@@ -106,6 +107,12 @@ impl SignEngine {
         if pose == HandPose::Point {
             self.reset();
             self.fired = false;
+            // Face-anchored (CSL §6): with face tracking on, COMMAND only
+            // arms near the chin — the true ASL location parameter.
+            if near_face == Some(false) {
+                self.reset_point();
+                return None;
+            }
             if self.point_fired || now < self.refractory_until {
                 return None;
             }
@@ -176,7 +183,7 @@ mod tests {
     ) -> Option<CslSign> {
         let mut t = from;
         while t <= to {
-            if let Some(s) = e.step(pose, Some(pos), 0.1, true, t) {
+            if let Some(s) = e.step(pose, Some(pos), 0.1, None, true, t) {
                 return Some(s);
             }
             t += 1.0 / 30.0;
@@ -247,7 +254,7 @@ mod tests {
         // Steady palm at scale 0.1…
         let mut t = 0.0;
         while t < 0.3 {
-            assert_eq!(e.step(HandPose::OpenPalm, Some([100.0, 100.0]), 0.1, true, t), None);
+            assert_eq!(e.step(HandPose::OpenPalm, Some([100.0, 100.0]), 0.1, None, true, t), None);
             t += 1.0 / 30.0;
         }
         // …then a shove: scale grows ~8%/frame (≈2.4×/s at 30 fps).
@@ -255,7 +262,7 @@ mod tests {
         let mut fired = None;
         for _ in 0..6 {
             scale *= 1.08;
-            if let Some(s) = e.step(HandPose::OpenPalm, Some([100.0, 100.0]), scale, true, t) {
+            if let Some(s) = e.step(HandPose::OpenPalm, Some([100.0, 100.0]), scale, None, true, t) {
                 fired = Some(s);
                 break;
             }
@@ -268,7 +275,7 @@ mod tests {
     fn tracking_loss_aborts() {
         let mut e = SignEngine::new();
         assert_eq!(feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 0.0, 0.8), None);
-        assert_eq!(e.step(HandPose::OpenPalm, None, 0.1, false, 0.85), None);
+        assert_eq!(e.step(HandPose::OpenPalm, None, 0.1, None, false, 0.85), None);
         assert_eq!(feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 0.9, 1.5), None);
         assert_eq!(
             feed(&mut e, HandPose::OpenPalm, [100.0, 100.0], 1.5, 2.1),

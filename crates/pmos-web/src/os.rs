@@ -73,7 +73,7 @@ thread_local! {
     static VOICE_STATUS: RefCell<Vec<(bool, bool, String)>> = const { RefCell::new(Vec::new()) };
     static LLM_TIER: RefCell<Option<u8>> = const { RefCell::new(None) };
     static WEB_RESULTS: RefCell<Vec<(u32, bool, String)>> = const { RefCell::new(Vec::new()) };
-    static FACE_FRAME: RefCell<Option<(f32, f32, f32)>> = const { RefCell::new(None) };
+    static FACE_FRAME: RefCell<Option<(f32, f32, f32, f32, f32)>> = const { RefCell::new(None) };
     static MIC_GRANTED: RefCell<bool> = const { RefCell::new(false) };
     static VOICE_TRANSCRIPTS: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
     static VFS_LOADED: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
@@ -187,11 +187,12 @@ pub fn pmos_web_result(id: u32, ok: bool, body: String) {
     WEB_RESULTS.with(|q| q.borrow_mut().push((id, ok, body)));
 }
 
-/// Called by gesture.js with face blendshape scores (M10, opt-in):
-/// eyeBlinkLeft, eyeBlinkRight, jawOpen. Blendshapes only — never pixels.
+/// Called by gesture.js with face signals (M10, opt-in): eyeBlink scores,
+/// jawOpen, and the chin landmark (camera-normalized; -1 = no face).
+/// Blendshapes + one landmark only — never pixels.
 #[wasm_bindgen]
-pub fn pmos_face_frame(blink_l: f32, blink_r: f32, jaw: f32) {
-    FACE_FRAME.with(|f| *f.borrow_mut() = Some((blink_l, blink_r, jaw)));
+pub fn pmos_face_frame(blink_l: f32, blink_r: f32, jaw: f32, chin_x: f32, chin_y: f32) {
+    FACE_FRAME.with(|f| *f.borrow_mut() = Some((blink_l, blink_r, jaw, chin_x, chin_y)));
 }
 
 /// Preview pixels for the Hand Tracker viewer (RGBA, mirrored). These go
@@ -583,8 +584,8 @@ impl OsApp {
         }
         // Face layer (M10, opt-in): blendshapes → kernel; double-blink
         // injects a click at the current pointer (accessibility).
-        if let Some((bl, br, jaw)) = FACE_FRAME.with(|f| f.borrow_mut().take()) {
-            self.kernel.face_frame(bl, br, jaw, now);
+        if let Some((bl, br, jaw, cx, cy)) = FACE_FRAME.with(|f| f.borrow_mut().take()) {
+            self.kernel.face_frame(bl, br, jaw, cx, cy, now);
         }
         // Machine-probed LLM tier: surface via /sys/llm_tier, and — when the
         // user never saved an AI config — fit the default model to the tier.

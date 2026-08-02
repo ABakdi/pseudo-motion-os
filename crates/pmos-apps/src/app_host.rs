@@ -302,6 +302,86 @@ fn render_node(app: &mut AppInstance, node: &Node, ui: &mut egui::Ui, now_ms: f6
                 });
             }
         }
+        "canvas" => {
+            // v1 canvas (App DSL §5): a fixed-size surface drawn from a list
+            // of draw-op maps — {"kind":"circle","x":..,"y":..,"r":..,
+            // "color":"#hex"} / rect(w,h) / line(x2,y2) / text(text,size).
+            // `on_pointer` fires with locals px/py on click.
+            let w = eval_num(app, node, "width", 240.0, now_ms) as f32;
+            let h = eval_num(app, node, "height", 160.0, now_ms) as f32;
+            let (rect, resp) =
+                ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 6.0, egui::Color32::from_black_alpha(120));
+            let ops = list_prop(app, node, "draw", now_ms);
+            for op in ops.iter().take(512) {
+                let Value::Map(m) = op else { continue };
+                let num = |k: &str| m.get(k).map(|v| v.as_num() as f32).unwrap_or(0.0);
+                let color = m
+                    .get("color")
+                    .map(|v| v.display())
+                    .and_then(|c| {
+                        u32::from_str_radix(c.trim_start_matches('#'), 16).ok()
+                    })
+                    .map(|rgb| {
+                        egui::Color32::from_rgb(
+                            (rgb >> 16) as u8,
+                            (rgb >> 8) as u8,
+                            rgb as u8,
+                        )
+                    })
+                    .unwrap_or(theme::accent_a());
+                let o = rect.min;
+                match m.get("kind").map(|v| v.display()).as_deref() {
+                    Some("circle") => {
+                        painter.circle_filled(
+                            o + egui::vec2(num("x"), num("y")),
+                            num("r").max(0.5),
+                            color,
+                        );
+                    }
+                    Some("rect") => {
+                        painter.rect_filled(
+                            egui::Rect::from_min_size(
+                                o + egui::vec2(num("x"), num("y")),
+                                egui::vec2(num("w").max(0.0), num("h").max(0.0)),
+                            ),
+                            2.0,
+                            color,
+                        );
+                    }
+                    Some("line") => {
+                        painter.line_segment(
+                            [
+                                o + egui::vec2(num("x"), num("y")),
+                                o + egui::vec2(num("x2"), num("y2")),
+                            ],
+                            egui::Stroke::new(num("width").max(1.0), color),
+                        );
+                    }
+                    Some("text") => {
+                        painter.text(
+                            o + egui::vec2(num("x"), num("y")),
+                            egui::Align2::LEFT_TOP,
+                            m.get("text").map(|v| v.display()).unwrap_or_default(),
+                            egui::FontId::proportional(num("size").max(8.0)),
+                            color,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            if resp.clicked() {
+                if let (Some(pos), Some(handler)) =
+                    (resp.interact_pointer_pos(), str_prop(node, "on_pointer"))
+                {
+                    let mut locals = HashMap::new();
+                    locals.insert("px".into(), Value::Num((pos.x - rect.min.x) as f64));
+                    locals.insert("py".into(), Value::Num((pos.y - rect.min.y) as f64));
+                    app.run_handler(&handler.to_string(), &locals, now_ms);
+                }
+            }
+        }
         "progress" => {
             let v = eval_num(app, node, "value", 0.0, now_ms).clamp(0.0, 1.0) as f32;
             ui.add(
