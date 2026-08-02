@@ -79,6 +79,22 @@ impl ProcessTable {
         }
     }
 
+    /// One line per process, for /sys/processes (M6 deferral).
+    pub fn listing(&self) -> String {
+        let mut rows: Vec<(u32, String)> = self
+            .procs
+            .iter()
+            .map(|(pid, p)| (pid.0, format!("{:>4}  {:<14} {} caps", pid.0, p.name, p.caps.len())))
+            .collect();
+        rows.sort();
+        let mut out = String::from(" PID  NAME           GRANTS\n");
+        for (_, row) in rows {
+            out.push_str(&row);
+            out.push('\n');
+        }
+        out
+    }
+
     pub fn has_cap(&self, pid: Pid, cap: &Capability) -> bool {
         self.procs.get(&pid).is_some_and(|p| p.caps.contains(cap))
     }

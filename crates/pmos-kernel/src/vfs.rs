@@ -28,6 +28,10 @@ pub struct Vfs {
     /// In-browser LLM tier this machine can handle (0 Fast · 1 Balanced ·
     /// 2 Quality), probed by the platform at boot from RAM + GPU limits.
     pub sys_llm_tier: u8,
+    /// Process table snapshot, refreshed by the kernel on register/kill.
+    pub sys_processes: String,
+    /// AI activity ring buffer (M6 deferral: /sys/ai/log) — newest last.
+    pub sys_ai_log: std::collections::VecDeque<String>,
 }
 
 fn normalize(path: &str) -> String {
@@ -63,6 +67,8 @@ impl Vfs {
             ready: false,
             sys_fps: 0.0,
             sys_llm_tier: 1,
+            sys_processes: String::new(),
+            sys_ai_log: std::collections::VecDeque::new(),
         };
         for d in [
             "/",
@@ -110,6 +116,15 @@ impl Vfs {
             "/sys/fps" => Some(format!("{:.1}\n", self.sys_fps).into_bytes()),
             "/sys/abi" => Some(format!("{:?}\n", pmos_abi::ABI_VERSION).into_bytes()),
             "/sys/llm_tier" => Some(format!("{}\n", self.sys_llm_tier).into_bytes()),
+            "/sys/processes" => Some(self.sys_processes.clone().into_bytes()),
+            "/sys/ai/log" => Some(
+                self.sys_ai_log
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .into_bytes(),
+            ),
             _ => None,
         }
     }
@@ -171,16 +186,27 @@ impl Vfs {
     pub fn list(&self, path: &str) -> Option<Vec<DirEntry>> {
         let path = normalize(path);
         if path == "/sys" {
-            return Some(
-                ["fps", "abi", "llm_tier"]
-                    .iter()
-                    .map(|n| DirEntry {
-                        name: n.to_string(),
-                        dir: false,
-                        size: 0,
-                    })
-                    .collect(),
-            );
+            let mut entries: Vec<DirEntry> = ["fps", "abi", "llm_tier", "processes"]
+                .iter()
+                .map(|n| DirEntry {
+                    name: n.to_string(),
+                    dir: false,
+                    size: 0,
+                })
+                .collect();
+            entries.push(DirEntry {
+                name: "ai".to_string(),
+                dir: true,
+                size: 0,
+            });
+            return Some(entries);
+        }
+        if path == "/sys/ai" {
+            return Some(vec![DirEntry {
+                name: "log".to_string(),
+                dir: false,
+                size: 0,
+            }]);
         }
         if !self.dirs.contains(&path) {
             return None;

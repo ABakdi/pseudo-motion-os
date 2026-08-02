@@ -92,6 +92,9 @@ impl Kernel {
 
     /// Streamed LLM delta from the platform → AiChunk event to the requester.
     pub fn ai_chunk(&mut self, agent: u32, delta: String, done: bool) {
+        if done {
+            self.ai_log(format!("← agent {agent} reply finished"));
+        }
         if let Some(requester) = self.ai.chunk(agent, &delta, done) {
             self.push_event(
                 requester,
@@ -116,6 +119,14 @@ impl Kernel {
             self.input.pointer_moved(pos, pmos_abi::InputSource::Hand);
             let (pose, tracking) = (self.input.hands.pose, self.input.hands.tracking);
             self.input.fusion.step(pose, pos, tracking);
+        }
+        // CSL sign recognition rides the same debounced pose stream.
+        if let Some(sign) = self.input.signs.step(
+            self.input.hands.pose,
+            self.input.hands.tracking,
+            now,
+        ) {
+            self.push_event(proc::SHELL_PID, KernelEvent::Sign { sign });
         }
         self.publish_hand_state();
         // Raw landmarks flow only while the viewer wants them, and only to
@@ -250,6 +261,15 @@ impl Kernel {
         self.events.entry(pid).or_default().push(ev);
     }
 
+    /// Append to the /sys/ai/log ring (transparency — AI System spec §3).
+    fn ai_log(&mut self, line: String) {
+        let log = &mut self.vfs.sys_ai_log;
+        log.push_back(line);
+        while log.len() > 200 {
+            log.pop_front();
+        }
+    }
+
     /// Scoped filesystem capability check: the caller must hold an
     /// FsRead/FsWrite whose scope prefixes the requested path.
     fn require_fs(&self, caller: Pid, path: &str, write: bool) -> Result<(), ErrorCode> {
@@ -297,6 +317,7 @@ impl KernelApi for Kernel {
                     g
                 };
                 let pid = self.procs.register(&name, granted);
+                self.vfs.sys_processes = self.procs.listing();
                 Ok(Reply::Pid(pid))
             }
             Syscall::ProcKill(pid) => {
@@ -305,6 +326,7 @@ impl KernelApi for Kernel {
                     return Err(ErrorCode::CapabilityDenied);
                 }
                 self.procs.kill(pid);
+                self.vfs.sys_processes = self.procs.listing();
                 self.windows.retain(|_, w| w.owner != pid);
                 Ok(Reply::None)
             }
@@ -395,6 +417,12 @@ impl KernelApi for Kernel {
             }
             Syscall::AiPrompt { agent, msg } => {
                 self.require(caller, &Capability::AiPrompt)?;
+                let head: String = msg.chars().take(100).collect();
+                self.ai_log(format!(
+                    "→ agent {} ({caller:?}): {head}{}",
+                    agent.0,
+                    if msg.chars().count() > 100 { "…" } else { "" }
+                ));
                 if let Err(e) = self.ai.prompt(agent, caller, msg) {
                     // Deliver the failure as a terminal chunk so callers have
                     // one uniform streaming path.
