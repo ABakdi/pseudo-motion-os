@@ -6,6 +6,7 @@
 
 pub mod fusion;
 pub mod hands;
+pub mod signs;
 
 use pmos_abi::{InputSource, KernelEvent};
 
@@ -19,6 +20,8 @@ pub struct InputPipeline {
     pub hands: hands::HandsState,
     /// Pose → pointer-intent fusion (M4: gestures control the UI).
     pub fusion: fusion::Fusion,
+    /// CSL motion-sign recognition (Computer Sign Language spec §3).
+    pub signs: signs::SignEngine,
 }
 
 impl InputPipeline {
@@ -28,6 +31,7 @@ impl InputPipeline {
             active_source: InputSource::Mouse,
             hands: hands::HandsState::new(),
             fusion: fusion::Fusion::new(),
+            signs: signs::SignEngine::new(),
         }
     }
 

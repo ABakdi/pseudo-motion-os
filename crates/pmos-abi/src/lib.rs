@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 9);
+pub const ABI_VERSION: (u16, u16) = (1, 10);
 
 // ---------- handles ----------
 
@@ -261,8 +261,23 @@ pub enum HandPose {
     ThumbsDown,
 }
 
+/// A completed CSL motion sign (Computer Sign Language spec §4, ABI 1.10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CslSign {
+    /// ✋→✊ squeeze: toggle Voice Kit capture.
+    Record,
+    /// ☝ chin-outward flick: the next utterance is a command.
+    Command,
+    /// ✋ push toward camera: Esc-equivalent.
+    Cancel,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum KernelEvent {
+    /// A CSL motion sign completed (ABI 1.10) — sent to the shell.
+    Sign {
+        sign: CslSign,
+    },
     PointerMove {
         pos: [f32; 2],
         source: InputSource,

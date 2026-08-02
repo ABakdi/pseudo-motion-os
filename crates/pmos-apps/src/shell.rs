@@ -37,6 +37,8 @@ pub struct Shell {
     palette: Palette,
     call_since: Option<f64>,
     call_fired: bool,
+    /// Mirrors VoiceStatus — the RECORD sign toggles based on this.
+    voice_listening: bool,
     /// 👍/👎 hold state (G9 stage binding: add / remove-newest).
     thumbs_since: Option<f64>,
     thumbs_fired: bool,
@@ -80,6 +82,7 @@ impl Shell {
             palette: Palette::new(),
             call_since: None,
             call_fired: false,
+            voice_listening: false,
             thumbs_since: None,
             thumbs_fired: false,
             thumbs_down_since: None,
@@ -513,9 +516,26 @@ impl Shell {
                     available,
                     reason,
                 } => {
+                    self.voice_listening = listening;
                     let outcomes = self.palette.on_voice_status(listening, available, &reason);
                     ai_outcomes.extend(outcomes);
                 }
+                KernelEvent::Sign { sign } => match sign {
+                    pmos_abi::CslSign::Record => {
+                        // ✋→✊ squeeze: toggle voice capture (CSL spec §4).
+                        if self.voice_listening {
+                            let _ =
+                                kernel.syscall(self.pid, Syscall::VoiceCapture { start: false });
+                            self.toast("⏸ voice stopped (✋→✊ to start again)".into(), now);
+                        } else {
+                            self.palette.start_voice();
+                            let _ =
+                                kernel.syscall(self.pid, Syscall::VoiceCapture { start: true });
+                            self.toast("● listening — ✋→✊ again to stop".into(), now);
+                        }
+                    }
+                    _ => {}
+                },
                 KernelEvent::VoiceTranscript { text, is_final } => {
                     let outcomes = self.palette.on_voice_transcript(text, is_final);
                     ai_outcomes.extend(outcomes);
