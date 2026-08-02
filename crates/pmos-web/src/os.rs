@@ -236,6 +236,35 @@ fn copy_to_clipboard(text: &str) {
     }
 }
 
+/// Push voice preferences (Whisper model size) from /settings/voice.json to
+/// speech.js. Called after VFS boot and whenever that file is rewritten.
+fn apply_voice_config(kernel: &pmos_kernel::Kernel) {
+    let Some(bytes) = kernel.vfs.read("/settings/voice.json") else {
+        return;
+    };
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return;
+    };
+    let Some(size) = v.get("whisper").and_then(|s| s.as_str()) else {
+        return;
+    };
+    let Some(win) = web_sys::window() else { return };
+    let Ok(g) = js_sys::Reflect::get(&win, &JsValue::from_str("pmosVoice")) else {
+        return;
+    };
+    if let Ok(f) = js_sys::Reflect::get(&g, &JsValue::from_str("configure")) {
+        if let Some(f) = f.dyn_ref::<js_sys::Function>() {
+            let opts = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(
+                &opts,
+                &JsValue::from_str("whisper"),
+                &JsValue::from_str(size),
+            );
+            let _ = f.call1(&g, &opts);
+        }
+    }
+}
+
 /// Apply the kernel voice directive to speech.js (start/stop capture).
 fn apply_voice_directive(capture: bool) {
     let Some(win) = web_sys::window() else { return };
@@ -459,11 +488,15 @@ impl OsApp {
         if let Some(ok) = VFS_READY.with(|q| q.borrow_mut().take()) {
             self.kernel.vfs.ready = true;
             log::info!("vfs ready (persistent: {ok})");
+            apply_voice_config(&self.kernel);
         }
         for op in std::mem::take(&mut self.kernel.vfs.dirty) {
             use pmos_kernel::vfs::VfsOp;
             match op {
                 VfsOp::Write(path, bytes) => {
+                    if path == "/settings/voice.json" {
+                        apply_voice_config(&self.kernel);
+                    }
                     let arr = js_sys::Array::of2(
                         &JsValue::from_str(&path),
                         &js_sys::Uint8Array::from(bytes.as_slice()).into(),

@@ -39,15 +39,18 @@ function clean(text) {
     .trim();
 }
 
-async function init(navLang) {
+async function init(navLang, size) {
   const { pipeline } = await import(
     "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.1"
   );
   lang = (navLang || "en").split("-")[0].toLowerCase();
   multilingual = lang !== "en";
+  // Model size from Settings → Voice: tiny (~40 MB) / base (~80 MB) /
+  // small (~250 MB) — bigger is more accurate, downloads once.
+  const sz = ["tiny", "base", "small"].includes(size) ? size : "tiny";
   const model = multilingual
-    ? "onnx-community/whisper-tiny"
-    : "onnx-community/whisper-tiny.en";
+    ? `onnx-community/whisper-${sz}`
+    : `onnx-community/whisper-${sz}.en`;
 
   let lastPct = -1;
   const progress_callback = (p) => {
@@ -82,7 +85,7 @@ self.onmessage = async (e) => {
   const m = e.data;
   if (m.type === "init") {
     try {
-      await init(m.lang);
+      await init(m.lang, m.size);
     } catch (err) {
       postMessage({ type: "error", error: String(err) });
     }

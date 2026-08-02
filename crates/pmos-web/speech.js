@@ -34,6 +34,7 @@
   let worker = null;
   let workerReady = false;
   let workerFailed = false;
+  let whisperSize = "tiny"; // Settings → Voice; applies to the next session
   let device = "";
   let busy = false;
   let pendingJob = null; // {audio, rate, final} queued while busy/loading
@@ -102,7 +103,11 @@
         startWebSpeech();
       }
     };
-    worker.postMessage({ type: "init", lang: navigator.language || "en-US" });
+    worker.postMessage({
+      type: "init",
+      lang: navigator.language || "en-US",
+      size: whisperSize,
+    });
   }
 
   function flushJob() {
@@ -288,6 +293,23 @@
 
   // ---------- public interface (driven by kernel directives) ----------
   window.pmosVoice = {
+    /// Settings → Voice: swap the Whisper model size; a changed size
+    /// tears down the warm worker so the next session loads the new model.
+    configure(opts) {
+      const size = opts?.whisper;
+      if (size && size !== whisperSize) {
+        log("whisper size →", size);
+        whisperSize = size;
+        if (worker) {
+          worker.terminate();
+          worker = null;
+        }
+        workerReady = false;
+        workerFailed = false;
+        busy = false;
+        pendingJob = null;
+      }
+    },
     start() {
       if (active || rec) return;
       startWhisper();

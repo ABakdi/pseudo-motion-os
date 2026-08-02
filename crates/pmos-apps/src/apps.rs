@@ -150,6 +150,9 @@ pub struct AppState {
     appearance_loaded: bool,
     /// Machine-probed in-browser LLM tier (/sys/llm_tier); None = not read.
     llm_tier: Option<u8>,
+    // voice (Settings → Voice)
+    voice_model: String,
+    voice_loaded: bool,
     // stage (Settings → Stage, ABI 1.8)
     stage_az: f32,
     stage_el: f32,
@@ -193,6 +196,8 @@ impl AppState {
             app_scheme: 0,
             appearance_loaded: false,
             llm_tier: None,
+            voice_model: "tiny".to_string(),
+            voice_loaded: false,
             stage_az: 215.0,
             stage_el: 60.0,
             stage_intensity: 1.0,
@@ -1199,12 +1204,58 @@ impl AppState {
         self.appearance_ui(ui, kernel, pid);
         ui.add_space(10.0);
         ui.separator();
+        self.voice_ui(ui, kernel, pid);
+        ui.add_space(10.0);
+        ui.separator();
         self.stage_ui(ui, kernel, pid);
         ui.add_space(10.0);
         ui.separator();
         ui.weak("Gestures are tuned in the Hand Tracker app.");
         ui.weak("Stage: drag = orbit · wheel = zoom · shift/middle-drag = pan · Home/double-click = reset");
         ui.weak("Hands: ✊ grab & throw (empty space = orbit) · ✌ over the stage = zoom");
+    }
+
+    /// Settings → Voice: Whisper model size (deferred item from the voice
+    /// milestone) — persisted to /settings/voice.json; the platform applies
+    /// it to the speech engine (takes effect on the next voice session).
+    fn voice_ui(&mut self, ui: &mut egui::Ui, kernel: &mut dyn KernelApi, pid: Pid) {
+        const PATH: &str = "/settings/voice.json";
+        const MODELS: &[(&str, &str)] = &[
+            ("tiny", "Fast — ~40 MB, fine for commands"),
+            ("base", "Balanced — ~80 MB, better accuracy"),
+            ("small", "Accurate — ~250 MB, dictation-grade"),
+        ];
+        if !self.voice_loaded {
+            self.voice_loaded = true;
+            if let Ok(pmos_abi::Reply::Bytes(b)) =
+                kernel.syscall(pid, Syscall::FsRead { path: PATH.into() })
+            {
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
+                    if let Some(m) = v["whisper"].as_str() {
+                        self.voice_model = m.to_string();
+                    }
+                }
+            }
+        }
+        ui.heading("Voice");
+        ui.add_space(4.0);
+        let mut changed = false;
+        for (id, label) in MODELS {
+            changed |= ui
+                .radio_value(&mut self.voice_model, id.to_string(), *label)
+                .changed();
+        }
+        if changed {
+            let json = serde_json::json!({ "whisper": self.voice_model }).to_string();
+            let _ = kernel.syscall(
+                pid,
+                Syscall::FsWrite {
+                    path: PATH.into(),
+                    bytes: json.into_bytes(),
+                },
+            );
+        }
+        ui.weak("speech-to-text runs on this machine; a changed size downloads once");
     }
 
     /// Settings → Stage (ABI 1.8): spawn/clear physics objects, sun control.
