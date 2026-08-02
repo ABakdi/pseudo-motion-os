@@ -345,6 +345,10 @@ struct OsApp {
     mouse_left_down: bool,
     /// Shift held (winit modifiers) — shift+drag pans the stage camera.
     shift_down: bool,
+    /// Last mouse CursorMoved time — the hand yields while the mouse is live.
+    last_mouse_move: f64,
+    /// 👌 pinch routing: Ui click/drag, or Prop (object grabbed by pinch).
+    pinch_mode: GrabMode,
     /// Last hand cursor position forwarded to egui (sub-point jitter from a
     /// resting hand would otherwise fight the mouse for the pointer).
     last_hand_move: Option<[f32; 2]>,
@@ -401,6 +405,8 @@ impl OsApp {
             last_press: 0.0,
             mouse_left_down: false,
             shift_down: false,
+            last_mouse_move: -10.0,
+            pinch_mode: GrabMode::None,
             last_hand_move: None,
         }
     }
@@ -610,31 +616,66 @@ impl OsApp {
             let p = |xy: [f32; 2]| egui::pos2(xy[0], xy[1]);
             match intent {
                 HandIntent::Move(pos) => {
-                    // The mouse owns the pointer while its button is down
-                    // (drags, text selection); and a resting hand's sub-point
-                    // jitter must not spam pointer moves.
+                    // Mouse priority: while the mouse button is down OR the
+                    // mouse moved recently, the hand yields the pointer
+                    // entirely (user request: no fighting cursors). Sub-point
+                    // hand jitter is deduplicated too.
                     let moved = self
                         .last_hand_move
                         .map(|l| (pos[0] - l[0]).abs() + (pos[1] - l[1]).abs() > 0.5)
                         .unwrap_or(true);
-                    if !self.mouse_left_down && moved {
+                    let mouse_active = self.mouse_left_down
+                        || now_secs() - self.last_mouse_move < 1.0;
+                    if self.pinch_mode == GrabMode::Prop {
+                        // Pinch-dragging an object: the hand steers physics.
+                        self.kernel.move_grab(pos, viewport);
+                    } else if !mouse_active && moved {
                         self.last_hand_move = Some(pos);
                         ev.push(egui::Event::PointerMoved(p(pos)));
                     }
                 }
-                HandIntent::Press { pos, secondary } | HandIntent::Release { pos, secondary } => {
-                    let pressed = matches!(intent, HandIntent::Press { .. });
-                    ev.push(egui::Event::PointerMoved(p(pos)));
-                    ev.push(egui::Event::PointerButton {
-                        pos: p(pos),
-                        button: if secondary {
-                            egui::PointerButton::Secondary
-                        } else {
-                            egui::PointerButton::Primary
-                        },
-                        pressed,
-                        modifiers: egui::Modifiers::default(),
-                    });
+                HandIntent::Press { pos, secondary } => {
+                    // 👌 pinch = the hand's click AND its object grab (user
+                    // decision 2026-08-02, matching CSL §5 pinch-select):
+                    // over UI it clicks; over a stage object it grabs it.
+                    let on_ui = self
+                        .egui_ctx
+                        .layer_id_at(p(pos))
+                        .is_some_and(is_ui_layer);
+                    if !secondary && !on_ui && self.kernel.try_grab_prop(pos, viewport) {
+                        self.pinch_mode = GrabMode::Prop;
+                    } else {
+                        self.pinch_mode = GrabMode::Ui;
+                        ev.push(egui::Event::PointerMoved(p(pos)));
+                        ev.push(egui::Event::PointerButton {
+                            pos: p(pos),
+                            button: if secondary {
+                                egui::PointerButton::Secondary
+                            } else {
+                                egui::PointerButton::Primary
+                            },
+                            pressed: true,
+                            modifiers: egui::Modifiers::default(),
+                        });
+                    }
+                }
+                HandIntent::Release { pos, secondary } => {
+                    if self.pinch_mode == GrabMode::Prop {
+                        self.kernel.release_grab(); // velocity carries: throw
+                    } else {
+                        ev.push(egui::Event::PointerMoved(p(pos)));
+                        ev.push(egui::Event::PointerButton {
+                            pos: p(pos),
+                            button: if secondary {
+                                egui::PointerButton::Secondary
+                            } else {
+                                egui::PointerButton::Primary
+                            },
+                            pressed: false,
+                            modifiers: egui::Modifiers::default(),
+                        });
+                    }
+                    self.pinch_mode = GrabMode::None;
                 }
                 HandIntent::Scroll { pos, dy }
                     if !self
@@ -659,7 +700,9 @@ impl OsApp {
                     });
                 }
                 HandIntent::GrabStart(pos) => {
-                    // Decide once per grab: UI drag, physics prop, or orbit.
+                    // ✊ owns the SPACE, 👌 owns the OBJECTS (user decision
+                    // 2026-08-02): a fist over UI drags the window, anywhere
+                    // else it orbits the camera. Objects are pinch-grabbed.
                     if self.egui_ctx.layer_id_at(p(pos)).is_some_and(is_ui_layer) {
                         self.hand_grab_mode = GrabMode::Ui;
                         ev.push(egui::Event::PointerMoved(p(pos)));
@@ -669,8 +712,6 @@ impl OsApp {
                             pressed: true,
                             modifiers: egui::Modifiers::default(),
                         });
-                    } else if self.kernel.try_grab_prop(pos, viewport) {
-                        self.hand_grab_mode = GrabMode::Prop;
                     } else {
                         self.hand_grab_mode = GrabMode::Orbit;
                     }
@@ -919,6 +960,7 @@ impl ApplicationHandler for OsApp {
                     _ => {}
                 }
                 self.last_cursor = Some(pos);
+                self.last_mouse_move = now_secs();
                 self.kernel
                     .input
                     .pointer_moved([pos.0, pos.1], pmos_abi::InputSource::Mouse);

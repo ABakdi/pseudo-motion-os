@@ -46,12 +46,27 @@ impl HandCursor {
         }
     }
 
-    pub fn draw(&self, ctx: &egui::Context) {
-        if !self.camera_enabled {
+    pub fn draw(&mut self, ctx: &egui::Context) {
+        // ONE cursor for every source (user decision 2026-08-02): the OS
+        // arrow is hidden, and this glyph follows whichever device last
+        // moved the shared pointer — morphing by hand pose while the hand
+        // drives, and by button state while the mouse does.
+        ctx.output_mut(|o| o.cursor_icon = egui::CursorIcon::None);
+        let latest = ctx.pointer_latest_pos();
+        let Some(center) = latest.or_else(|| self.pos.map(|[x, y]| egui::pos2(x, y))) else {
             return;
+        };
+        let hand_driving = self.camera_enabled
+            && self.tracking
+            && self
+                .pos
+                .is_some_and(|[x, y]| (x - center.x).abs() + (y - center.y).abs() < 2.0);
+        let (mouse_down, mouse_pressed) = ctx.input(|i| {
+            (i.pointer.primary_down(), i.pointer.primary_pressed())
+        });
+        if !hand_driving && mouse_pressed {
+            self.last_pinch = ctx.input(|i| i.time); // mouse clicks ripple too
         }
-        let Some([x, y]) = self.pos else { return };
-        let center = egui::pos2(x, y);
         let t = ctx.input(|i| i.time) as f32;
 
         egui::Area::new(egui::Id::new("hand-cursor"))
@@ -60,7 +75,7 @@ impl HandCursor {
             .interactable(false)
             .show(ctx, |ui| {
                 let p = ui.painter();
-                // Click ripple: expanding fading ring after a pinch onset.
+                // Click ripple: expanding fading ring after a pinch/click.
                 let since = (ctx.input(|i| i.time) - self.last_pinch) as f32;
                 if (0.0..0.35).contains(&since) {
                     let k = since / 0.35;
@@ -70,14 +85,24 @@ impl HandCursor {
                         egui::Stroke::new(2.0 * (1.0 - k), theme::accent_a().gamma_multiply(1.0 - k)),
                     );
                 }
-                if !self.tracking {
-                    // Frozen + dim + slow blink until the hand returns.
-                    let a = 0.25 + 0.15 * (t * 2.0).sin().abs();
-                    p.circle_stroke(
-                        center,
-                        11.0,
-                        egui::Stroke::new(1.5, theme::INK_DIM.gamma_multiply(a)),
-                    );
+                if !hand_driving {
+                    // Mouse-driven (or idle): the same PMOS ring; a held
+                    // button tightens it into the "pinched" solid dot.
+                    if mouse_down {
+                        p.circle_filled(center, 6.0, theme::accent_a());
+                        p.circle_stroke(
+                            center,
+                            10.0,
+                            egui::Stroke::new(1.0, theme::accent_a().gamma_multiply(0.35)),
+                        );
+                    } else {
+                        p.circle_stroke(
+                            center,
+                            11.0,
+                            egui::Stroke::new(2.0, theme::accent_a().gamma_multiply(0.85)),
+                        );
+                        p.circle_filled(center, 2.2, theme::INK);
+                    }
                     return;
                 }
                 match self.pose {
@@ -100,7 +125,7 @@ impl HandCursor {
                     }
                     HandPose::Grab => glyph(p, center, "✊", 26.0),
                     HandPose::OpenPalm => {
-                        // Palm bloom: radial pulse (entry pose of the RECORD sign).
+                        // Palm bloom: radial pulse (RECORD sign counting up).
                         let pulse = 12.0 + 6.0 * (t * 3.0).sin().abs();
                         p.circle_stroke(
                             center,

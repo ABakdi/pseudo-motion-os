@@ -12,6 +12,14 @@ Entry format:
 
 ---
 
+## [2026-08-02] — One cursor, pinch owns objects, fist owns the space
+### Code
+- **✊/👍 confusion fixed** (user-reported "almost always thumbs-up"): a fist's wrapped thumb passed the weak extension check and fell into the thumbs branch. Thumbs-up/down now require a LONG (>1.35× palm) and clearly VERTICAL thumb; anything less is Grab. 2 new classifier tests.
+- **Role split (user decision):** 👌 pinch = click AND object grab — pinching a stage object attaches the spring (release throws), exactly like mouse click-drag; ✊ fist = the space — window drag over UI, camera orbit anywhere else. No more overload, and it matches CSL §5's pinch-select.
+- **One cursor for all sources (user decision):** the OS arrow is hidden; the PMOS ring follows the shared pointer everywhere — hand poses morph it while the hand drives, mouse presses tighten it into the solid dot with the same click ripple. Mouse priority: hand pointer motion yields for 1 s after any mouse movement, so the two never fight.
+### Specs
+- [[Hand Gestures]] G2/G4 rewritten for the pinch/fist role split and classifier rule.
+
 ## [2026-08-02] — Stage input round 2: the background hint layer, RECORD off the fist, hover glow
 ### Code
 - **Third input blocker found** (live-debugged): the tray hint — an `Order::Background` egui Area — was returned by `layer_id_at` over a band of the screen, so stage presses there read as "on UI" and orbit/grab/zoom never engaged. The hint and toasts are now `interactable(false)`, and all stage routing treats Background-order layers as backdrops, never UI. **Wheel zoom verified working on the empty stage after the fix.**

@@ -330,15 +330,24 @@ fn classify(lm: &[f32], pinch_enter: f32) -> HandPose {
         (true, false, false, false, true) => HandPose::CallSign,
         (_, true, true, false, false) => HandPose::TwoFinger,
         (_, true, false, false, false) => HandPose::Point,
-        (true, false, false, false, false) => {
-            // Thumb direction disambiguates up from down (y grows downward).
-            if pt(lm, THUMB_TIP).1 < wrist.1 - 0.4 * scale {
-                HandPose::ThumbsUp
+        (_, false, false, false, false) => {
+            // Fist family. A fist's thumb often wraps far enough to pass the
+            // weak extension check, which used to misread ✊ as 👍 constantly
+            // (user-reported). Thumbs-up/down now demands a LONG, clearly
+            // VERTICAL thumb; anything less is a Grab.
+            let ttip = pt(lm, THUMB_TIP);
+            let (dx, dy) = ((ttip.0 - wrist.0).abs(), ttip.1 - wrist.1);
+            let thumb_len = dist(ttip, wrist) / scale;
+            if thumb && thumb_len > 1.35 && dy.abs() > dx * 1.1 {
+                if dy < 0.0 {
+                    HandPose::ThumbsUp
+                } else {
+                    HandPose::ThumbsDown
+                }
             } else {
-                HandPose::ThumbsDown
+                HandPose::Grab
             }
         }
-        (false, false, false, false, false) => HandPose::Grab,
         _ => HandPose::Rest,
     }
 }
@@ -404,6 +413,21 @@ mod tests {
     fn classifies_grab_when_all_curled() {
         let lm = hand(&[]);
         assert_eq!(classify(&lm, PINCH_ENTER), HandPose::Grab);
+    }
+
+    #[test]
+    fn fist_with_wrapped_thumb_is_grab_not_thumbs_up() {
+        // Thumb slightly out and above its IP — a normal fist — must NOT
+        // read as 👍 (user-reported confusion).
+        let lm = hand(&[(THUMB_IP, 0.08, -0.05), (THUMB_TIP, 0.10, -0.09)]);
+        assert_eq!(classify(&lm, PINCH_ENTER), HandPose::Grab);
+    }
+
+    #[test]
+    fn real_thumbs_up_still_classifies() {
+        // Long, clearly vertical thumb well above the wrist.
+        let lm = hand(&[(THUMB_IP, 0.02, -0.09), (THUMB_TIP, 0.03, -0.16)]);
+        assert_eq!(classify(&lm, PINCH_ENTER), HandPose::ThumbsUp);
     }
 
     #[test]
