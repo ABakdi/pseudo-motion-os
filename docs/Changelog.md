@@ -12,6 +12,10 @@ Entry format:
 
 ---
 
+## [2026-08-04] — WebLLM moves off the main thread
+### Code
+- **Worker offload (deferred since the WebLLM integration)**: the MLCEngine now lives in the new `webllm-worker.js` via WebLLM's `CreateWebWorkerMLCEngine` — token generation used to jank the entire OS (camera loop, cursor, physics) because inference shared the main thread. The single-engine + `reload()` discipline is unchanged; teardown also terminates the worker so a failed runtime never gets reused; browsers without WebGPU-in-workers fall back to the main-thread engine automatically (one attempt, then remembered).
+
 ## [2026-08-04] — Gaze assist: look at a window and it glows (M10 complete)
 ### Code
 - **Gaze estimation in the gesture worker** ([[Computer Sign Language#6]]): iris centers (landmarks 468/473) between the eye corners give the eye-in-head component, the nose tip against the inter-ocular line gives a head yaw/pitch proxy (the dominant term), and the eyeLook blendshapes steady the vertical — combined into one coarse `[0,1]²` gaze point per face frame. Derived scalars only ever cross the worker boundary; pixels never do.

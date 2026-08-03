@@ -67,8 +67,14 @@
   }
 
   // ---------- single engine, reload to switch ----------
+  // The engine lives in webllm-worker.js so token generation never janks
+  // the main thread (camera loop, cursor, physics keep running while the
+  // model streams). Falls back to a main-thread engine on browsers without
+  // WebGPU-in-workers. Either way: ONE engine, switched with reload().
   let engine = null;
   let engineModel = null;
+  let engineWorker = null;
+  let workerBroken = false; // don't retry the worker path every request
   let progressCb = null; // registered once; retargeted per request
   let chain = Promise.resolve(); // serialize requests
 
@@ -80,9 +86,26 @@
       log("reloading engine:", engineModel, "→", model);
       await engine.reload(model);
     } else {
-      engine = await lib.CreateMLCEngine(model, {
-        initProgressCallback: (p) => progressCb?.(p),
-      });
+      if (!workerBroken) {
+        try {
+          engineWorker = new Worker("webllm-worker.js", { type: "module" });
+          engine = await lib.CreateWebWorkerMLCEngine(engineWorker, model, {
+            initProgressCallback: (p) => progressCb?.(p),
+          });
+          log("engine running in worker (main thread stays smooth)");
+        } catch (err) {
+          log("worker engine unavailable, falling back to main thread:", err);
+          workerBroken = true;
+          engineWorker?.terminate?.();
+          engineWorker = null;
+          engine = null;
+        }
+      }
+      if (!engine) {
+        engine = await lib.CreateMLCEngine(model, {
+          initProgressCallback: (p) => progressCb?.(p),
+        });
+      }
     }
     engineModel = model;
     return engine;
@@ -90,13 +113,20 @@
 
   async function teardown() {
     const e = engine;
+    const w = engineWorker;
     engine = null;
     engineModel = null;
+    engineWorker = null;
     if (e) {
       try {
         await e.unload();
       } catch {}
     }
+    // A failed worker runtime can't be trusted — kill it; the next request
+    // spawns a fresh one.
+    try {
+      w?.terminate?.();
+    } catch {}
   }
 
   async function infer(chunk, model, messages) {
