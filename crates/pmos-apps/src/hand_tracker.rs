@@ -34,9 +34,14 @@ const BONES: [(usize, usize); 21] = [
     (0, 17),
 ];
 
+/// Iris landmark blocks in the 478-point face mesh (centers 468 and 473).
+const IRIS_RIGHT: usize = 468;
+const IRIS_LEFT: usize = 473;
+
 pub struct HandTrackerState {
     pub show_feed: bool,
     pub show_marks: bool,
+    pub show_face: bool,
     pub tuning: HandsTuning,
     sent_tuning: HandsTuning,
     sent_viewer: Option<(bool, bool)>,
@@ -47,6 +52,7 @@ impl HandTrackerState {
         Self {
             show_feed: true,
             show_marks: true,
+            show_face: true,
             tuning: HandsTuning::default(),
             sent_tuning: HandsTuning::default(),
             sent_viewer: None,
@@ -73,6 +79,8 @@ impl HandTrackerState {
         pid: Pid,
         feed: Option<egui::TextureId>,
         raw: &(Vec<f32>, u8),
+        face: &[f32],
+        gaze: Option<(f32, f32)>,
         camera_enabled: bool,
         camera_reason: &str,
         tracking: bool,
@@ -129,6 +137,33 @@ impl HandTrackerState {
                             theme::INK_DIM,
                         );
                     }
+                }
+            }
+            // Face mesh overlay (M10): the full 478-point cloud, dim, with
+            // the iris rings highlighted — the eye-tracking debug view.
+            if self.show_face && face.len() >= 478 * 3 {
+                // Mirror x to match the selfie-view preview (same as hands).
+                let fmap = |i: usize| {
+                    egui::pos2(
+                        rect.left() + (1.0 - face[i * 3]) * rect.width(),
+                        rect.top() + face[i * 3 + 1] * rect.height(),
+                    )
+                };
+                let dim = theme::INK_DIM.gamma_multiply(0.5);
+                for i in 0..478 {
+                    p.circle_filled(fmap(i), 0.7, dim);
+                }
+                // Iris blocks: center + 4 rim points each, in accent.
+                for center in [IRIS_RIGHT, IRIS_LEFT] {
+                    for j in 1..5 {
+                        p.circle_filled(fmap(center + j), 1.4, theme::accent_b());
+                    }
+                    p.circle_filled(fmap(center), 2.2, theme::accent_a());
+                    p.circle_stroke(
+                        fmap(center),
+                        5.0,
+                        egui::Stroke::new(1.0, theme::accent_a().gamma_multiply(0.7)),
+                    );
                 }
             }
             if self.show_marks {
@@ -196,10 +231,59 @@ impl HandTrackerState {
         ui.add_space(4.0);
         ui.separator();
 
+        // ---------- gaze debug (CSL spec §6) ----------
+        // A mini-map of the screen with the live gaze estimate: the honest
+        // answer to "is eye tracking working, and where does it think I look?"
+        ui.horizontal(|ui| {
+            let (mrect, _) =
+                ui.allocate_exact_size(egui::vec2(96.0, 54.0), egui::Sense::hover());
+            let mp = ui.painter_at(mrect);
+            mp.rect_filled(mrect, 4.0, egui::Color32::from_white_alpha(6));
+            mp.rect_stroke(
+                mrect,
+                4.0,
+                egui::Stroke::new(1.0, theme::INK_DIM.gamma_multiply(0.4)),
+                egui::StrokeKind::Inside,
+            );
+            match gaze {
+                Some((gx, gy)) => {
+                    let dot = egui::pos2(
+                        mrect.left() + gx.clamp(0.0, 1.0) * mrect.width(),
+                        mrect.top() + gy.clamp(0.0, 1.0) * mrect.height(),
+                    );
+                    mp.circle_filled(dot, 4.0, theme::accent_a());
+                    ui.vertical(|ui| {
+                        ui.colored_label(
+                            theme::accent_a(),
+                            format!("👁 gaze · {:.0}% → {:.0}% ↓", gx * 100.0, gy * 100.0),
+                        );
+                        ui.weak("coarse regions, not a cursor — the halo on screen");
+                        ui.weak("shows it live; windows under it glow");
+                    });
+                }
+                None => {
+                    ui.vertical(|ui| {
+                        ui.weak("👁 gaze: no signal");
+                        if face.len() >= 478 * 3 {
+                            ui.weak("face is tracked — turn on Gaze assist in Settings → Face");
+                        } else {
+                            ui.weak("enable Face gestures + Gaze assist in Settings → Face,");
+                            ui.weak("then face the camera");
+                        }
+                    });
+                }
+            }
+        });
+
+        ui.add_space(4.0);
+        ui.separator();
+
         // ---------- display toggles ----------
         ui.checkbox(&mut self.show_feed, "Show camera feed")
             .on_hover_text("Off = landmarks on black — nothing from the camera is displayed");
         ui.checkbox(&mut self.show_marks, "Show hand landmarks");
+        ui.checkbox(&mut self.show_face, "Show face mesh + eyes")
+            .on_hover_text("The 478-point face mesh with iris highlights — needs Face gestures on in Settings");
 
         // ---------- detection settings ----------
         ui.add_space(4.0);

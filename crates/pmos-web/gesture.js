@@ -63,6 +63,7 @@
           busy = false;
           window.wasmBindings.pmos_hands_frame(m.data, m.hands);
         } else if (m.type === "face") {
+          if (m.mesh && m.mesh.length) window.wasmBindings.pmos_face_mesh(m.mesh);
           window.wasmBindings.pmos_face_frame(m.blinkL, m.blinkR, m.jaw ?? 0, m.brow ?? 0, m.chinX ?? -1, m.chinY ?? -1, m.gazeX ?? -1, m.gazeY ?? -1);
         } else if (m.type === "error") {
           console.error("[pmos gestures] worker:", m.message);

@@ -12,6 +12,12 @@ Entry format:
 
 ---
 
+## [2026-08-04] — Hand Tracker shows the face mesh & eyes; gaze becomes visible (ABI 1.16)
+### Code
+- **Face mesh in the viewer** (user report: gaze felt dead — there was no way to see what the eye tracker saw): the gesture worker now ships the full 478-point face mesh alongside the blendshapes (landmarks only — never pixels); the kernel forwards it as `RawFace` events under the exact `RawHands` policy (viewer open + `InputRawHands`); the Hand Tracker draws the dim point cloud with **iris centers and rims highlighted** over the preview, with a "Show face mesh + eyes" toggle. Stale meshes (>1 s) aren't drawn — a frozen mesh reads as tracked.
+- **Gaze mini-map + halo**: the Hand Tracker gains a small screen mini-map with the live gaze dot and percentage readout — and when there's no signal it says exactly why ("face is tracked — turn on Gaze assist in Settings → Face" vs. "enable Face gestures…"). While the viewer is open, a soft halo shows the gaze estimate on the actual screen, so aim is debuggable; the window glow still needs no viewer.
+- **Eye movement now sweeps the estimate**: the eye-in-head weights were tuned for head motion — iris travel is only ~±0.15 of the eye-corner span, so "moving my eyes" barely registered. Horizontal iris weight 1.6 → 3.0, vertical eyeLook weight 0.5 → 1.0, smoothing α 0.18 → 0.25.
+
 ## [2026-08-04] — The ray tracer sees the stage (deferred since M7)
 ### Code
 - **Stage → ray-tracer scene sync**: the props you drop, grab and throw now appear inside the ◇ Ray Tracer window, live — a storage buffer mirrors up to 64 physics props per frame (position, body quaternion, half-extent, color); spheres trace as spheres, cubes as **oriented boxes** (slab test in the box's local frame via quaternion rotation), both diffuse so they pick up the mirror/glass reflections of the demo scene. Notes-graph nodes deliberately stay out.

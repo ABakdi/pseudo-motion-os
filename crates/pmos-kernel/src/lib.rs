@@ -234,6 +234,18 @@ impl Kernel {
         }
     }
 
+    /// Face mesh frame → viewer overlay (ABI 1.16). Same policy as raw hand
+    /// landmarks: only while the viewer is open, only to InputRawHands.
+    pub fn face_mesh(&mut self, data: Vec<f32>) {
+        if self.hands_directives.viewer_open
+            && self
+                .procs
+                .has_cap(proc::SHELL_PID, &Capability::InputRawHands)
+        {
+            self.push_event(proc::SHELL_PID, KernelEvent::RawFace { data });
+        }
+    }
+
     /// Per-frame upkeep: tracking-loss timeout and shell notification.
     pub fn tick_hands(&mut self, now: f64) {
         let was_tracking = self.input.hands.tracking;
@@ -450,7 +462,7 @@ impl Kernel {
             // worse than one that lags half a second.
             let target = (1.0 - gaze_x, gaze_y);
             let (px, py) = self.face.gaze.unwrap_or(target);
-            const ALPHA: f32 = 0.18;
+            const ALPHA: f32 = 0.25;
             let sm = (
                 px + (target.0 - px) * ALPHA,
                 py + (target.1 - py) * ALPHA,

@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 15);
+pub const ABI_VERSION: (u16, u16) = (1, 16);
 
 // ---------- handles ----------
 
@@ -363,6 +363,13 @@ pub enum KernelEvent {
     RawHands {
         data: Vec<f32>,
         hands: u8,
+    },
+    /// Raw face mesh frame (ABI 1.16): `478 × [x,y,z]` normalized camera
+    /// coordinates — the viewer overlay for the face layer (mesh + iris).
+    /// Same policy as `RawHands`: only while the viewer is open, only to
+    /// `InputRawHands` holders, and landmarks only — never pixels.
+    RawFace {
+        data: Vec<f32>,
     },
     /// Speech-engine state (ABI 1.5). `listening` while capture runs;
     /// `available = false` means the engine cannot run at all (unsupported

@@ -74,6 +74,7 @@ thread_local! {
     static LLM_TIER: RefCell<Option<u8>> = const { RefCell::new(None) };
     static WEB_RESULTS: RefCell<Vec<(u32, bool, String)>> = const { RefCell::new(Vec::new()) };
     static FACE_FRAME: RefCell<Option<[f32; 8]>> = const { RefCell::new(None) };
+    static FACE_MESH: RefCell<Option<Vec<f32>>> = const { RefCell::new(None) };
     static MIC_GRANTED: RefCell<bool> = const { RefCell::new(false) };
     static VOICE_TRANSCRIPTS: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
     static VFS_LOADED: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
@@ -206,6 +207,14 @@ pub fn pmos_face_frame(
     FACE_FRAME.with(|f| {
         *f.borrow_mut() = Some([blink_l, blink_r, jaw, brow, chin_x, chin_y, gaze_x, gaze_y])
     });
+}
+
+/// Full face mesh (478 × [x,y,z] camera-normalized) for the Hand Tracker
+/// viewer overlay (ABI 1.16). Landmarks only — the kernel drops the frame
+/// unless the viewer is open.
+#[wasm_bindgen]
+pub fn pmos_face_mesh(data: Vec<f32>) {
+    FACE_MESH.with(|f| *f.borrow_mut() = Some(data));
 }
 
 /// Preview pixels for the Hand Tracker viewer (RGBA, mirrored). These go
@@ -609,6 +618,9 @@ impl OsApp {
             FACE_FRAME.with(|f| f.borrow_mut().take())
         {
             self.kernel.face_frame(bl, br, jaw, brow, cx, cy, gx, gy, now);
+        }
+        if let Some(mesh) = FACE_MESH.with(|f| f.borrow_mut().take()) {
+            self.kernel.face_mesh(mesh);
         }
         // Machine-probed LLM tier: surface via /sys/llm_tier, and — when the
         // user never saved an AI config — fit the default model to the tier.

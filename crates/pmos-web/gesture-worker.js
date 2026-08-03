@@ -142,8 +142,10 @@ function gazeEstimate(lm, get) {
     (get("eyeLookDownLeft") + get("eyeLookDownRight")) / 2 -
     (get("eyeLookUpLeft") + get("eyeLookUpRight")) / 2;
   const clamp = (v) => Math.min(1, Math.max(0, v));
-  const gx = clamp(0.5 + yaw * 1.4 + (hx - 0.5) * 1.6);
-  const gy = clamp(0.5 + (pitch - 0.55) * 1.3 + lookV * 0.5);
+  // Eye-in-head weighted heavily: iris travel is only ~±0.15 of the corner
+  // span, but "move your eyes across the screen" must sweep the estimate.
+  const gx = clamp(0.5 + yaw * 1.4 + (hx - 0.5) * 3.0);
+  const gy = clamp(0.5 + (pitch - 0.55) * 1.3 + lookV * 1.0);
   return [gx, gy];
 }
 
@@ -189,17 +191,32 @@ onmessage = async (e) => {
         const lm = fr.faceLandmarks?.[0];
         const chin = lm?.[152]; // canonical chin point
         const [gx, gy] = lm ? gazeEstimate(lm, get) : [-1, -1];
-        postMessage({
-          type: "face",
-          blinkL: get("eyeBlinkLeft"),
-          blinkR: get("eyeBlinkRight"),
-          jaw: get("jawOpen"),
-          brow: get("browInnerUp"),
-          chinX: chin ? chin.x : -1,
-          chinY: chin ? chin.y : -1,
-          gazeX: gx,
-          gazeY: gy,
-        });
+        // Full mesh for the viewer overlay (landmarks only — never pixels);
+        // the kernel drops it unless the Hand Tracker viewer is open.
+        let mesh = null;
+        if (lm) {
+          mesh = new Float32Array(lm.length * 3);
+          lm.forEach((p, i) => {
+            mesh[i * 3] = p.x;
+            mesh[i * 3 + 1] = p.y;
+            mesh[i * 3 + 2] = p.z;
+          });
+        }
+        postMessage(
+          {
+            type: "face",
+            blinkL: get("eyeBlinkLeft"),
+            blinkR: get("eyeBlinkRight"),
+            jaw: get("jawOpen"),
+            brow: get("browInnerUp"),
+            chinX: chin ? chin.x : -1,
+            chinY: chin ? chin.y : -1,
+            gazeX: gx,
+            gazeY: gy,
+            mesh,
+          },
+          mesh ? [mesh.buffer] : []
+        );
       }
     }
   } catch (err) {

@@ -34,6 +34,9 @@ pub struct Shell {
     cursor: HandCursor,
     /// Latest raw landmark frame (viewer overlay; capability-gated events).
     raw_hands: (Vec<f32>, u8),
+    /// Latest face mesh frame + arrival time (478 × xyz, viewer overlay —
+    /// ABI 1.16). Stale frames aren't drawn: a frozen mesh reads as tracked.
+    raw_face: (Vec<f32>, f64),
     /// The command palette (UI spec §2.4).
     palette: Palette,
     call_since: Option<f64>,
@@ -92,6 +95,7 @@ impl Shell {
             open_apps: Vec::new(),
             cursor: HandCursor::new(),
             raw_hands: (Vec::new(), 0),
+            raw_face: (Vec::new(), 0.0),
             palette: Palette::new(),
             call_since: None,
             call_fired: false,
@@ -817,6 +821,7 @@ impl Shell {
                     self.cursor.camera_reason = reason;
                 }
                 KernelEvent::RawHands { data, hands } => self.raw_hands = (data, hands),
+                KernelEvent::RawFace { data } => self.raw_face = (data, now),
                 KernelEvent::AiChunk { agent, text, done } => {
                     let outcomes = self.palette.on_chunk(agent, &text, done);
                     ai_outcomes.extend(outcomes);
@@ -1096,6 +1101,21 @@ impl Shell {
             screen.min.x + fx.clamp(0.0, 1.0) * screen.width(),
             screen.min.y + fy.clamp(0.0, 1.0) * screen.height(),
         );
+        // Debug affordance: while the Hand Tracker is open, the estimate is
+        // visible on screen as a soft halo — otherwise "is it working?" is
+        // unanswerable, since the highlight needs a window under the gaze.
+        if self.is_open(AppKind::HandTracker) {
+            let p = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Background,
+                egui::Id::new("gaze-halo"),
+            ));
+            p.circle_filled(pos, 46.0, theme::accent_b().gamma_multiply(0.10));
+            p.circle_stroke(
+                pos,
+                46.0,
+                egui::Stroke::new(1.5, theme::accent_b().gamma_multiply(0.4)),
+            );
+        }
         let Some(layer) = ctx.layer_id_at(pos) else {
             return;
         };
@@ -1223,6 +1243,12 @@ impl Shell {
         // Snapshot the cursor/landmark state the Hand Tracker window needs,
         // so the window closure doesn't re-borrow self.
         let raw = self.raw_hands.clone();
+        let rawface = if now - self.raw_face.1 < 1.0 {
+            self.raw_face.0.clone()
+        } else {
+            Vec::new()
+        };
+        let gaze_now = self.gaze.map(|(g, _)| g);
         let cam_on = self.cursor.camera_enabled;
         let cam_reason = self.cursor.camera_reason.clone();
         let tracking = self.cursor.tracking;
@@ -1264,6 +1290,8 @@ impl Shell {
                         pid,
                         camera_feed,
                         &raw,
+                        &rawface,
+                        gaze_now,
                         cam_on,
                         &cam_reason,
                         tracking,
