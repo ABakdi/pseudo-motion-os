@@ -5,6 +5,9 @@
 
 use pmos_abi::{Capability, KernelApi, Pid, Reply, Syscall, AGENT_ASSISTANT};
 
+/// Drag-and-drop payload for the Files app: the full path being dragged.
+struct FileDrag(String);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppKind {
     Terminal,
@@ -563,6 +566,33 @@ impl AppState {
 
     // ---------------- files ----------------
 
+    /// Move a file into `dest_dir` (drag-and-drop): read → write → delete,
+    /// all through capability-checked syscalls. Files only — moving a whole
+    /// directory would need a recursive copy the VFS doesn't offer yet.
+    fn files_move(&mut self, kernel: &mut dyn KernelApi, pid: Pid, src: &str, dest_dir: &str) {
+        let name = src.rsplit('/').next().unwrap_or(src);
+        let dst = if dest_dir == "/" {
+            format!("/{name}")
+        } else {
+            format!("{dest_dir}/{name}")
+        };
+        if dst == src || src.starts_with("/sys") || dest_dir.starts_with("/sys") {
+            return;
+        }
+        if let Ok(Reply::Bytes(bytes)) = kernel.syscall(pid, Syscall::FsRead { path: src.into() }) {
+            if kernel
+                .syscall(pid, Syscall::FsWrite { path: dst.clone(), bytes })
+                .is_ok()
+            {
+                let _ = kernel.syscall(pid, Syscall::FsDelete { path: src.into() });
+                if self.files_selected.as_deref() == Some(src) {
+                    self.files_selected = None;
+                    self.files_preview = None;
+                }
+            }
+        }
+    }
+
     fn file_icon(name: &str, dir: bool) -> &'static str {
         if dir {
             return "📁";
@@ -625,6 +655,24 @@ impl AppState {
                 ));
             }
         }
+        // Drag-and-drop (UI spec §3.3): files drag, folders receive. The
+        // extra `interact` re-registers the same widget with a drag sense.
+        if dir {
+            if resp.dnd_hover_payload::<FileDrag>().is_some() {
+                resp.ctx.layer_painter(resp.layer_id).rect_stroke(
+                    resp.rect.expand(1.0),
+                    6.0,
+                    egui::Stroke::new(1.5, crate::theme::accent_a()),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            if let Some(dropped) = resp.dnd_release_payload::<FileDrag>() {
+                self.files_move(kernel, pid, &dropped.0, full);
+            }
+        } else if !full.starts_with("/sys") {
+            resp.interact(egui::Sense::drag())
+                .dnd_set_drag_payload(FileDrag(full.to_string()));
+        }
         // Right-click / middle-pinch context menu (UI spec §3.3).
         resp.context_menu(|ui| {
             if dir {
@@ -673,6 +721,7 @@ impl AppState {
         pid: Pid,
     ) -> Option<AppAction> {
         let mut action = None;
+        let mut places_drop: Option<(String, String)> = None; // (src, dest dir)
 
         // ---- Places sidebar ----
         egui::Panel::left(egui::Id::new(("files-places", pid.0)))
@@ -690,13 +739,31 @@ impl AppState {
                 ] {
                     let here = self.files_cwd == path
                         || self.files_cwd.starts_with(&format!("{path}/")) && path != "/";
-                    if ui.selectable_label(here, format!("{icon} {name}")).clicked() {
+                    let resp = ui.selectable_label(here, format!("{icon} {name}"));
+                    if resp.clicked() {
                         self.files_cwd = path.into();
                         self.files_selected = None;
                         self.files_preview = None;
                     }
+                    // Places are drop targets too — drag a file onto Notes.
+                    if path != "/sys" {
+                        if resp.dnd_hover_payload::<FileDrag>().is_some() {
+                            ui.painter().rect_stroke(
+                                resp.rect.expand(1.0),
+                                6.0,
+                                egui::Stroke::new(1.5, crate::theme::accent_a()),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                        if let Some(dropped) = resp.dnd_release_payload::<FileDrag>() {
+                            places_drop = Some((dropped.0.clone(), path.to_string()));
+                        }
+                    }
                 }
             });
+        if let Some((src, dest)) = places_drop {
+            self.files_move(kernel, pid, &src, &dest);
+        }
 
         // ---- Preview sidebar ----
         if let Some(sel) = self.files_selected.clone() {
@@ -913,6 +980,26 @@ impl AppState {
                 self.files_new_name.clear();
             }
         });
+
+        // Drag ghost: the dragged file's name floats with the pointer.
+        if let Some(payload) = egui::DragAndDrop::payload::<FileDrag>(ui.ctx()) {
+            if let Some(pos) = ui.ctx().pointer_latest_pos() {
+                let name = payload.0.rsplit('/').next().unwrap_or(&payload.0);
+                let painter = ui
+                    .ctx()
+                    .layer_painter(egui::LayerId::new(
+                        egui::Order::Tooltip,
+                        egui::Id::new("files-drag-ghost"),
+                    ));
+                painter.text(
+                    pos + egui::vec2(14.0, 10.0),
+                    egui::Align2::LEFT_CENTER,
+                    format!("{} {name}", Self::file_icon(name, false)),
+                    egui::FontId::proportional(12.5),
+                    crate::theme::INK,
+                );
+            }
+        }
         action
     }
 

@@ -12,6 +12,10 @@ Entry format:
 
 ---
 
+## [2026-08-04] — Files drag-and-drop (deferred since M6)
+### Code
+- **Drag a file, drop it on a folder** — in grid and list views alike, and onto the Places sidebar (drop a note on 📝 Notes to move it there). Folders under the pointer glow accent while a drag hovers; a drag ghost (icon + name) follows the pointer. Move = read → write → delete, every step a capability-checked syscall; directories don't drag (the VFS has no recursive copy yet) and `/sys` neither gives nor takes.
+
 ## [2026-08-04] — WebLLM moves off the main thread
 ### Code
 - **Worker offload (deferred since the WebLLM integration)**: the MLCEngine now lives in the new `webllm-worker.js` via WebLLM's `CreateWebWorkerMLCEngine` — token generation used to jank the entire OS (camera loop, cursor, physics) because inference shared the main thread. The single-engine + `reload()` discipline is unchanged; teardown also terminates the worker so a failed runtime never gets reused; browsers without WebGPU-in-workers fall back to the main-thread engine automatically (one attempt, then remembered).
