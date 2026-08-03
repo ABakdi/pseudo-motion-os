@@ -239,6 +239,20 @@ impl AppInstance {
                     _ => {}
                 }
             }
+            "set_key" => {
+                // Map mutation (spec §7): `{target, key, value}`. The key is
+                // a template/expression too, so `set_key {key: item}` works
+                // inside list_view rows.
+                let target = a.str_field("target").unwrap_or_default().to_string();
+                let key = self.eval_text_field(a, "key", locals, now_ms);
+                if let Some(v) = self.eval_field(a, "value", locals, now_ms) {
+                    if let Some(Value::Map(m)) = self.state.get_mut(&target) {
+                        if m.len() < 4096 || m.contains_key(&key) {
+                            m.insert(key, v);
+                        }
+                    }
+                }
+            }
             "if" => {
                 let cond = self
                     .eval_field(a, "cond", locals, now_ms)
@@ -327,6 +341,35 @@ mod tests {
             .effects
             .iter()
             .any(|e| matches!(e, Effect::Notify { .. })));
+        assert!(!app.misbehaving);
+    }
+
+    #[test]
+    fn set_key_mutates_map_state() {
+        let doc_json = serde_json::json!({
+            "conjure": "1.0",
+            "manifest": { "id": "m", "name": "m" },
+            "state": {
+                "settings": { "type": "map", "value": { "long_break": 15 } }
+            },
+            "ui": { "w": "column" },
+            "handlers": {
+                "save": [
+                    { "do": "set_key", "target": "settings",
+                      "key": "long_break", "value": "25" },
+                    { "do": "set_key", "target": "settings",
+                      "key": "sound", "value": "true" }
+                ]
+            }
+        });
+        let doc: crate::ast::Document = serde_json::from_value(doc_json).unwrap();
+        let mut app = AppInstance::new(doc, 0.0);
+        app.run_handler("save", &HashMap::new(), 0.0);
+        let Some(Value::Map(m)) = app.state.get("settings") else {
+            panic!("settings must stay a map");
+        };
+        assert_eq!(m.get("long_break"), Some(&Value::Num(25.0)));
+        assert_eq!(m.get("sound"), Some(&Value::Bool(true)));
         assert!(!app.misbehaving);
     }
 

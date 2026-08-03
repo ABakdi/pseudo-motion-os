@@ -12,6 +12,10 @@ Entry format:
 
 ---
 
+## [2026-08-04] — Conjure `set_key`: the v1 action catalog is complete
+### Code
+- **`set_key {target, key, value}`** (App DSL spec §7, the map-state mutation action, deferred since M5): validator accepts it, the interpreter executes it (key is a template so `set_key {key: item}` works inside `list_view` rows; the 4096-entry growth cap mirrors `push`), and the App Smith contract teaches it to the model. New native test. Every action verb in spec §7 is now implemented.
+
 ## [2026-08-04] — Files drag-and-drop (deferred since M6)
 ### Code
 - **Drag a file, drop it on a folder** — in grid and list views alike, and onto the Places sidebar (drop a note on 📝 Notes to move it there). Folders under the pointer glow accent while a drag hovers; a drag ghost (icon + name) follows the pointer. Move = read → write → delete, every step a capability-checked syscall; directories don't drag (the VFS has no recursive copy yet) and `/sys` neither gives nor takes.

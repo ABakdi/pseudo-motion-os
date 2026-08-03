@@ -48,6 +48,7 @@ pub const KNOWN_ACTIONS: &[&str] = &[
     "push",
     "remove_at",
     "clear",
+    "set_key",
     "if",
     "emit",
     "notify",
@@ -269,7 +270,7 @@ fn validate_actions(
                 &format!("{apath}/do"),
                 "ACT001",
                 format!("unknown action `{}`", a.verb),
-                "Use one of: set,toggle,inc,push,remove_at,clear,if,emit,notify,window,timer.",
+                "Use one of: set,toggle,inc,push,remove_at,clear,set_key,if,emit,notify,window,timer.",
             ));
         }
         if a.verb == "emit" {
