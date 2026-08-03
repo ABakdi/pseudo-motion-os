@@ -65,6 +65,9 @@ pub struct Shell {
     /// Boot-load of /settings/appearance.json (retried while OPFS loads).
     appearance_done: bool,
     appearance_tries: u32,
+    /// Latest gaze estimate (screen fractions) + arrival time (CSL §6):
+    /// soft-highlights the window under the gaze, expires when stale.
+    gaze: Option<((f32, f32), f64)>,
 }
 
 impl Shell {
@@ -108,6 +111,7 @@ impl Shell {
             themed: false,
             appearance_done: false,
             appearance_tries: 0,
+            gaze: None,
         }
     }
 
@@ -835,6 +839,9 @@ impl Shell {
                         self.toast(format!("⚠ voice: {reason}"), now);
                     }
                 }
+                KernelEvent::Gaze { x, y, active } => {
+                    self.gaze = active.then_some(((x, y), now));
+                }
                 KernelEvent::Sign { sign } => match sign {
                     pmos_abi::CslSign::Record => {
                         // ✋ still hold: toggle the always-on Voice Kit.
@@ -1001,6 +1008,7 @@ impl Shell {
         self.handle_outcomes(ai_outcomes, kernel, now);
         self.windows(ctx, kernel, camera_feed, rt_tex, today, now);
         self.conjure_windows(ctx, kernel, now);
+        self.gaze_overlay(ctx, now);
         self.dock(ctx, kernel);
         let palette_outcomes = self.palette.ui(ctx);
         self.handle_outcomes(palette_outcomes, kernel, now);
@@ -1067,6 +1075,63 @@ impl Shell {
                 let _ = kernel.syscall(self.pid, Syscall::ProcKill(capp.pid));
             }
         }
+    }
+
+    /// Gaze assist (CSL spec §6, opt-in): soft-highlight the window the user
+    /// is looking at. Deliberately passive — it never moves the cursor,
+    /// never focuses, never clicks; the hand stays the precision instrument.
+    fn gaze_overlay(&mut self, ctx: &egui::Context, now: f64) {
+        let Some(((fx, fy), at)) = self.gaze else {
+            return;
+        };
+        // The kernel announces loss, but also expire on silence (face model
+        // stalled, tab hidden) so a stale highlight can't stick around.
+        if now - at > 0.8 {
+            self.gaze = None;
+            return;
+        }
+        let screen = ctx.content_rect();
+        let pos = egui::pos2(
+            screen.min.x + fx.clamp(0.0, 1.0) * screen.width(),
+            screen.min.y + fy.clamp(0.0, 1.0) * screen.height(),
+        );
+        let Some(layer) = ctx.layer_id_at(pos) else {
+            return;
+        };
+        // Only real app windows glow — never the dock, palette, or overlays.
+        let is_window = self
+            .open_apps
+            .iter()
+            .map(|a| egui::Id::new(("app-window", a.win)))
+            .chain(
+                self.conjure_apps
+                    .iter()
+                    .map(|c| egui::Id::new(("conjure-window", c.win))),
+            )
+            .any(|id| id == layer.id);
+        if !is_window {
+            return;
+        }
+        let Some(rect) = ctx.memory(|m| m.area_rect(layer.id)) else {
+            return;
+        };
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Background,
+            egui::Id::new("gaze-glow"),
+        ));
+        let accent = theme::accent_a();
+        painter.rect_stroke(
+            rect.expand(4.0),
+            egui::CornerRadius::same(12),
+            egui::Stroke::new(2.0, accent.gamma_multiply(0.35)),
+            egui::StrokeKind::Outside,
+        );
+        painter.rect_stroke(
+            rect.expand(8.0),
+            egui::CornerRadius::same(14),
+            egui::Stroke::new(6.0, accent.gamma_multiply(0.10)),
+            egui::StrokeKind::Outside,
+        );
     }
 
     fn draw_toasts(&mut self, ctx: &egui::Context, now: f64) {

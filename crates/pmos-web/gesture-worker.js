@@ -117,6 +117,36 @@ async function ensureFace() {
   faceBuilding = false;
 }
 
+// Coarse gaze estimate (CSL spec §6, honest limits): head pose dominates,
+// eye-in-head refines. Iris centers (468/473) between the eye corners give
+// the eye component; the nose tip against the eye line gives yaw/pitch.
+// Output is camera-image-normalized [0,1] — the kernel mirrors and smooths.
+// This is REGION accuracy (thirds/quadrants), never a cursor.
+function gazeEstimate(lm, get) {
+  const irisR = lm[468], irisL = lm[473];
+  const rOut = lm[33], rIn = lm[133]; // right eye corners (image-left)
+  const lIn = lm[362], lOut = lm[263]; // left eye corners (image-right)
+  const nose = lm[1];
+  if (!irisR || !irisL || !rOut || !lOut || !nose) return [-1, -1];
+  // Eye-in-head horizontal: iris position across each eye's corner span.
+  const ratio = (p, a, b) => (b.x - a.x !== 0 ? (p.x - a.x) / (b.x - a.x) : 0.5);
+  const hx = (ratio(irisR, rOut, rIn) + ratio(irisL, lIn, lOut)) / 2;
+  // Head pose proxy: nose tip against the inter-ocular line.
+  const midX = (rOut.x + lOut.x) / 2;
+  const midY = (rOut.y + lOut.y) / 2;
+  const eyeDist = Math.hypot(lOut.x - rOut.x, lOut.y - rOut.y) || 1;
+  const yaw = (nose.x - midX) / eyeDist; // ~0 facing camera
+  const pitch = (nose.y - midY) / eyeDist; // ~0.55 neutral (nose below eyes)
+  // Eye-in-head vertical: blendshapes are steadier than iris-vs-eyelid.
+  const lookV =
+    (get("eyeLookDownLeft") + get("eyeLookDownRight")) / 2 -
+    (get("eyeLookUpLeft") + get("eyeLookUpRight")) / 2;
+  const clamp = (v) => Math.min(1, Math.max(0, v));
+  const gx = clamp(0.5 + yaw * 1.4 + (hx - 0.5) * 1.6);
+  const gy = clamp(0.5 + (pitch - 0.55) * 1.3 + lookV * 0.5);
+  return [gx, gy];
+}
+
 onmessage = async (e) => {
   const m = e.data;
   if (m.type === "face") {
@@ -156,7 +186,9 @@ onmessage = async (e) => {
       const cats = fr.faceBlendshapes?.[0]?.categories;
       if (cats) {
         const get = (n) => cats.find((c) => c.categoryName === n)?.score ?? 0;
-        const chin = fr.faceLandmarks?.[0]?.[152]; // canonical chin point
+        const lm = fr.faceLandmarks?.[0];
+        const chin = lm?.[152]; // canonical chin point
+        const [gx, gy] = lm ? gazeEstimate(lm, get) : [-1, -1];
         postMessage({
           type: "face",
           blinkL: get("eyeBlinkLeft"),
@@ -165,6 +197,8 @@ onmessage = async (e) => {
           brow: get("browInnerUp"),
           chinX: chin ? chin.x : -1,
           chinY: chin ? chin.y : -1,
+          gazeX: gx,
+          gazeY: gy,
         });
       }
     }

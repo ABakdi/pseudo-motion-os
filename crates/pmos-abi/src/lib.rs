@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 13);
+pub const ABI_VERSION: (u16, u16) = (1, 14);
 
 // ---------- handles ----------
 
@@ -301,6 +301,16 @@ pub enum KernelEvent {
     /// A CSL motion sign completed (ABI 1.10) — sent to the shell.
     Sign {
         sign: CslSign,
+    },
+    /// Coarse gaze estimate (ABI 1.14, CSL spec §6, opt-in): screen-fraction
+    /// coordinates (0..1, origin top-left), already mirrored and smoothed by
+    /// the kernel. Honest limits: region accuracy (thirds/quadrants), not a
+    /// cursor — v1 use is soft-highlighting the window under the gaze.
+    /// `active = false` means the face was lost or gaze assist turned off.
+    Gaze {
+        x: f32,
+        y: f32,
+        active: bool,
     },
     /// A `WebFetch` finished (ABI 1.11). `body` is text, truncated by the
     /// platform to a sane size.

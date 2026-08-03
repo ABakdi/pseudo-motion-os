@@ -12,6 +12,16 @@ Entry format:
 
 ---
 
+## [2026-08-04] — Gaze assist: look at a window and it glows (M10 complete)
+### Code
+- **Gaze estimation in the gesture worker** ([[Computer Sign Language#6]]): iris centers (landmarks 468/473) between the eye corners give the eye-in-head component, the nose tip against the inter-ocular line gives a head yaw/pitch proxy (the dominant term), and the eyeLook blendshapes steady the vertical — combined into one coarse `[0,1]²` gaze point per face frame. Derived scalars only ever cross the worker boundary; pixels never do.
+- **Kernel gaze pipeline (ABI 1.14)**: `pmos_face_frame` grew gaze args; the kernel drops them unless the user opted in (`/settings/face.json` "gaze" → `gaze_enabled`), mirrors x (same camera→screen convention as hands), EMA-smooths at α 0.18 (a highlight that flickers between windows is worse than one that lags), and streams the new `Gaze { x, y, active }` event; face loss announces `active = false` exactly once. New native test (opt-in gating, mirroring, smoothing, loss announcement).
+- **Shell soft-highlight**: the app window under the gaze gets a two-layer accent glow painted on the background layer — only real app/conjured windows qualify (`layer_id_at` matched against window ids — never the dock, palette or overlays), and the highlight expires after 0.8 s of silence. Deliberately passive per spec: gaze never moves the cursor, never focuses, never clicks.
+- **Settings → Face**: "Gaze assist" checkbox (own opt-in, disabled until face gestures are on) with an honest limits line — region accuracy, not a cursor.
+
+### Specs
+- [[Todo]]: M10 gaze assist ticked — **M10 is complete**. [[Computer Sign Language]] §6 gaze bullet marked implemented with the implementation notes.
+
 ## [2026-08-02] — Consent sheets: Tier-2 AI actions, G9 dialogs, brow-raise confirm
 ### Code
 - **Consent sheets (UI spec §5, ABI 1.13)**: the assistant gains `fs_delete` — its first Tier-2 tool — which NEVER executes directly: a modal card states what it wants ("delete the file /notes/x.md"), the tool loop suspends, and nothing happens until the user decides. Allow/Deny buttons, Esc = deny, and the sheet never times out. Denials return "the user DENIED this action — do not retry" to the model.

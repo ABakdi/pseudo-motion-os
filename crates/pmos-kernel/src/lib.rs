@@ -62,6 +62,9 @@ pub struct Kernel {
     face: FaceState,
     /// Set on double-blink; the platform injects a click at the pointer.
     pub face_click_pending: bool,
+    /// Gaze assist opt-in (Settings → Face → /settings/face.json "gaze");
+    /// set by the platform. Off = gaze scalars are dropped at the door.
+    pub gaze_enabled: bool,
     /// Previous frame's two-palm spread (camera-space) for zoom deltas.
     last_palm_spread: Option<f32>,
     /// Previous frame's second-hand pose+centroid (property-control deltas).
@@ -96,6 +99,7 @@ impl Kernel {
             next_web_id: 1,
             face: FaceState::default(),
             face_click_pending: false,
+            gaze_enabled: false,
             last_palm_spread: None,
             last_hand2: None,
             ai: ai::AiState::default(),
@@ -393,10 +397,19 @@ struct FaceState {
     brow_fired: bool,
     /// Chin landmark (camera space) + timestamp — anchors COMMAND (CSL §6).
     chin: Option<((f32, f32), f64)>,
+    /// Smoothed gaze estimate (screen fractions, mirrored) — CSL §6.
+    gaze: Option<(f32, f32)>,
+    /// Whether the last Gaze event announced `active` — lost/off sends one
+    /// `active = false` so the shell can drop the highlight immediately.
+    gaze_announced: bool,
 }
 
 impl Kernel {
-    /// Face frame from the platform: blinks, jawOpen, chin landmark (M10).
+    /// Face frame from the platform: blinks, jawOpen, chin landmark, and the
+    /// coarse gaze estimate (M10). Gaze arrives camera-image-normalized and
+    /// leaves as a mirrored, EMA-smoothed `Gaze` event — region accuracy
+    /// only (CSL spec §6): it soft-highlights, it never moves the cursor.
+    #[allow(clippy::too_many_arguments)]
     pub fn face_frame(
         &mut self,
         blink_l: f32,
@@ -405,8 +418,43 @@ impl Kernel {
         brow: f32,
         chin_x: f32,
         chin_y: f32,
+        gaze_x: f32,
+        gaze_y: f32,
         now: f64,
     ) {
+        if self.gaze_enabled && gaze_x >= 0.0 {
+            // Mirror x (camera vs. screen, same convention as the hands) and
+            // smooth heavily — a highlight that flickers between windows is
+            // worse than one that lags half a second.
+            let target = (1.0 - gaze_x, gaze_y);
+            let (px, py) = self.face.gaze.unwrap_or(target);
+            const ALPHA: f32 = 0.18;
+            let sm = (
+                px + (target.0 - px) * ALPHA,
+                py + (target.1 - py) * ALPHA,
+            );
+            self.face.gaze = Some(sm);
+            self.face.gaze_announced = true;
+            self.push_event(
+                proc::SHELL_PID,
+                KernelEvent::Gaze {
+                    x: sm.0,
+                    y: sm.1,
+                    active: true,
+                },
+            );
+        } else if self.face.gaze_announced {
+            self.face.gaze = None;
+            self.face.gaze_announced = false;
+            self.push_event(
+                proc::SHELL_PID,
+                KernelEvent::Gaze {
+                    x: 0.0,
+                    y: 0.0,
+                    active: false,
+                },
+            );
+        }
         // Brow-raise held 0.4 s → Confirm (consent sheets, UI spec §5).
         if brow > 0.5 {
             let since = *self.face.brow_since.get_or_insert(now);
@@ -911,5 +959,47 @@ mod tests {
         k.voice_status(false, true, String::new());
         assert!(!k.voice_directives.capture);
         assert_eq!(k.voice_directives.generation, g0 + 1);
+    }
+
+    #[test]
+    fn gaze_is_opt_in_mirrored_smoothed_and_announces_loss() {
+        let mut k = Kernel::new();
+        let _shell = register(&mut k, "shell");
+        let gaze_events = |k: &mut Kernel| -> Vec<(f32, f32, bool)> {
+            k.poll_events(proc::SHELL_PID)
+                .into_iter()
+                .filter_map(|e| match e {
+                    KernelEvent::Gaze { x, y, active } => Some((x, y, active)),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        // Off by default: gaze scalars are dropped at the door.
+        k.face_frame(0.0, 0.0, 0.0, 0.0, -1.0, -1.0, 0.8, 0.5, 0.0);
+        assert!(gaze_events(&mut k).is_empty());
+
+        k.gaze_enabled = true;
+        // First frame seeds the filter directly (no lag from a fake origin)
+        // and x is mirrored: camera 0.8 → screen 0.2.
+        k.face_frame(0.0, 0.0, 0.0, 0.0, -1.0, -1.0, 0.8, 0.5, 0.1);
+        let evs = gaze_events(&mut k);
+        assert_eq!(evs.len(), 1);
+        let (x0, y0, active) = evs[0];
+        assert!(active);
+        assert!((x0 - 0.2).abs() < 1e-5 && (y0 - 0.5).abs() < 1e-5);
+
+        // A jump only moves the estimate fractionally (EMA smoothing).
+        k.face_frame(0.0, 0.0, 0.0, 0.0, -1.0, -1.0, 0.0, 0.5, 0.2);
+        let (x1, _, _) = gaze_events(&mut k)[0];
+        assert!(x1 > x0 && x1 < 1.0 - 0.8 * 0.5, "smoothed, not teleported");
+
+        // Face lost → exactly one active=false, then silence.
+        k.face_frame(0.0, 0.0, 0.0, 0.0, -1.0, -1.0, -1.0, -1.0, 0.3);
+        let evs = gaze_events(&mut k);
+        assert_eq!(evs.len(), 1);
+        assert!(!evs[0].2);
+        k.face_frame(0.0, 0.0, 0.0, 0.0, -1.0, -1.0, -1.0, -1.0, 0.4);
+        assert!(gaze_events(&mut k).is_empty());
     }
 }

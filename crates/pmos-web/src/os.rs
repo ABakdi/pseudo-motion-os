@@ -73,7 +73,7 @@ thread_local! {
     static VOICE_STATUS: RefCell<Vec<(bool, bool, String)>> = const { RefCell::new(Vec::new()) };
     static LLM_TIER: RefCell<Option<u8>> = const { RefCell::new(None) };
     static WEB_RESULTS: RefCell<Vec<(u32, bool, String)>> = const { RefCell::new(Vec::new()) };
-    static FACE_FRAME: RefCell<Option<(f32, f32, f32, f32, f32, f32)>> = const { RefCell::new(None) };
+    static FACE_FRAME: RefCell<Option<[f32; 8]>> = const { RefCell::new(None) };
     static MIC_GRANTED: RefCell<bool> = const { RefCell::new(false) };
     static VOICE_TRANSCRIPTS: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
     static VFS_LOADED: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
@@ -188,9 +188,11 @@ pub fn pmos_web_result(id: u32, ok: bool, body: String) {
 }
 
 /// Called by gesture.js with face signals (M10, opt-in): eyeBlink scores,
-/// jawOpen, and the chin landmark (camera-normalized; -1 = no face).
-/// Blendshapes + one landmark only — never pixels.
+/// jawOpen, the chin landmark, and the coarse gaze estimate
+/// (camera-normalized; -1 = no face / no gaze).
+/// Blendshapes + derived scalars only — never pixels.
 #[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
 pub fn pmos_face_frame(
     blink_l: f32,
     blink_r: f32,
@@ -198,8 +200,12 @@ pub fn pmos_face_frame(
     brow: f32,
     chin_x: f32,
     chin_y: f32,
+    gaze_x: f32,
+    gaze_y: f32,
 ) {
-    FACE_FRAME.with(|f| *f.borrow_mut() = Some((blink_l, blink_r, jaw, brow, chin_x, chin_y)));
+    FACE_FRAME.with(|f| {
+        *f.borrow_mut() = Some([blink_l, blink_r, jaw, brow, chin_x, chin_y, gaze_x, gaze_y])
+    });
 }
 
 /// Preview pixels for the Hand Tracker viewer (RGBA, mirrored). These go
@@ -315,13 +321,21 @@ fn dispatch_web_fetch(id: u32, url: &str) {
 
 /// Push face-tracking preferences (/settings/face.json) to gesture.js —
 /// the face model only runs when the user opts in (Settings → Face).
-fn apply_face_config(kernel: &pmos_kernel::Kernel) {
-    let enabled = kernel
+/// Also gates the kernel's gaze pipeline (gaze assist is its own opt-in).
+fn apply_face_config(kernel: &mut pmos_kernel::Kernel) {
+    let cfg = kernel
         .vfs
         .read("/settings/face.json")
-        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+    let enabled = cfg
+        .as_ref()
         .and_then(|v| v.get("enabled").and_then(|e| e.as_bool()))
         .unwrap_or(false);
+    kernel.gaze_enabled = enabled
+        && cfg
+            .as_ref()
+            .and_then(|v| v.get("gaze").and_then(|e| e.as_bool()))
+            .unwrap_or(false);
     let Some(win) = web_sys::window() else { return };
     let Ok(g) = js_sys::Reflect::get(&win, &JsValue::from_str("pmosGestures")) else {
         return;
@@ -591,8 +605,10 @@ impl OsApp {
         }
         // Face layer (M10, opt-in): blendshapes → kernel; double-blink
         // injects a click at the current pointer (accessibility).
-        if let Some((bl, br, jaw, brow, cx, cy)) = FACE_FRAME.with(|f| f.borrow_mut().take()) {
-            self.kernel.face_frame(bl, br, jaw, brow, cx, cy, now);
+        if let Some([bl, br, jaw, brow, cx, cy, gx, gy]) =
+            FACE_FRAME.with(|f| f.borrow_mut().take())
+        {
+            self.kernel.face_frame(bl, br, jaw, brow, cx, cy, gx, gy, now);
         }
         // Machine-probed LLM tier: surface via /sys/llm_tier, and — when the
         // user never saved an AI config — fit the default model to the tier.
@@ -628,7 +644,7 @@ impl OsApp {
             self.kernel.vfs.ready = true;
             log::info!("vfs ready (persistent: {ok})");
             apply_voice_config(&self.kernel);
-            apply_face_config(&self.kernel);
+            apply_face_config(&mut self.kernel);
         }
         for op in std::mem::take(&mut self.kernel.vfs.dirty) {
             use pmos_kernel::vfs::VfsOp;
@@ -638,7 +654,7 @@ impl OsApp {
                         apply_voice_config(&self.kernel);
                     }
                     if path == "/settings/face.json" {
-                        apply_face_config(&self.kernel);
+                        apply_face_config(&mut self.kernel);
                     }
                     let arr = js_sys::Array::of2(
                         &JsValue::from_str(&path),

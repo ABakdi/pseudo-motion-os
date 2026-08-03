@@ -157,6 +157,7 @@ pub struct AppState {
     pub notes_graph_on: bool,
     // face (Settings → Face, M10 opt-in)
     face_enabled: bool,
+    face_gaze: bool,
     face_loaded: bool,
     // stage (Settings → Stage, ABI 1.8)
     stage_az: f32,
@@ -205,6 +206,7 @@ impl AppState {
             voice_loaded: false,
             notes_graph_on: false,
             face_enabled: false,
+            face_gaze: false,
             face_loaded: false,
             stage_az: 215.0,
             stage_el: 60.0,
@@ -1385,6 +1387,7 @@ impl AppState {
             {
                 if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
                     self.face_enabled = v["enabled"].as_bool().unwrap_or(false);
+                    self.face_gaze = v["gaze"].as_bool().unwrap_or(false);
                 }
             }
         }
@@ -1392,14 +1395,26 @@ impl AppState {
         ui.separator();
         ui.heading("Face");
         ui.add_space(4.0);
-        if ui
+        let mut changed = ui
             .checkbox(
                 &mut self.face_enabled,
                 "Face gestures — double-blink = click (experimental)",
             )
-            .changed()
-        {
-            let json = serde_json::json!({ "enabled": self.face_enabled }).to_string();
+            .changed();
+        ui.add_enabled_ui(self.face_enabled, |ui| {
+            changed |= ui
+                .checkbox(
+                    &mut self.face_gaze,
+                    "Gaze assist — the window you look at glows (experimental)",
+                )
+                .changed();
+        });
+        if changed {
+            let json = serde_json::json!({
+                "enabled": self.face_enabled,
+                "gaze": self.face_gaze,
+            })
+            .to_string();
             let _ = kernel.syscall(
                 pid,
                 Syscall::FsWrite {
@@ -1409,6 +1424,9 @@ impl AppState {
             );
         }
         ui.weak("face landmarks only, computed on this machine — video never leaves the camera pipeline");
+        if self.face_gaze {
+            ui.weak("gaze is region-accurate (thirds of the screen), not a cursor — it highlights, never clicks");
+        }
     }
 
     /// Settings → Stage (ABI 1.8): spawn/clear physics objects, sun control.
