@@ -12,6 +12,10 @@ Entry format:
 
 ---
 
+## [2026-08-04] — VFS: IndexedDB fallback (deferred since M6)
+### Code
+- **`storage.js` grows a second backend**: when OPFS fails at boot (some private windows, older engines), the same VFS tree persists via IndexedDB — flat `files` (path → bytes) and `dirs` (path marker) stores; `remove` matches OPFS's recursive semantics by prefix. The backend is picked once at load, the kernel never knows which one is under it, and only when both fail does the OS fall back to memory-only (as before).
+
 ## [2026-08-04] — AI budget caps: never silently exceeded (ABI 1.15)
 ### Code
 - **Monthly budget for remote AI providers** (deferred since M5; AI System spec: "soft warning and hard stop"): `AiProviderConfig.monthly_cap` (Settings → AI, in thousands of estimated tokens, 0 = off). The kernel meters both sides — the full outgoing body (history + system prompt, like a real bill) at send, the reply at completion — as chars/4 estimates; at 80% a one-shot ⚠ toast fires (new generic `Notice` event → shell toast), at 100% the request is refused with a terminal ⚠ chunk and the un-sent user turn is popped from history so a raised cap never replays a stale prompt. The meter persists to `/settings/ai_usage.json` and rolls over monthly (month pushed by the platform — the kernel has no clock). In-browser WebLLM is never metered: free, local, no bill to protect. New native test (metering, persistence, hard stop, WebLLM exemption).
