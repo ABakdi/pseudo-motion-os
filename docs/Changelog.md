@@ -12,6 +12,11 @@ Entry format:
 
 ---
 
+## [2026-08-04] — The ray tracer sees the stage (deferred since M7)
+### Code
+- **Stage → ray-tracer scene sync**: the props you drop, grab and throw now appear inside the ◇ Ray Tracer window, live — a storage buffer mirrors up to 64 physics props per frame (position, body quaternion, half-extent, color); spheres trace as spheres, cubes as **oriented boxes** (slab test in the box's local frame via quaternion rotation), both diffuse so they pick up the mirror/glass reflections of the demo scene. Notes-graph nodes deliberately stay out.
+- **Shader CI**: a new native test parses + naga-validates every `.wgsl` — shader typos used to surface only at runtime, on the GPU, in the browser; now they fail `cargo test`.
+
 ## [2026-08-04] — VFS: IndexedDB fallback (deferred since M6)
 ### Code
 - **`storage.js` grows a second backend**: when OPFS fails at boot (some private windows, older engines), the same VFS tree persists via IndexedDB — flat `files` (path → bytes) and `dirs` (path marker) stores; `remove` matches OPFS's recursive semantics by prefix. The backend is picked once at load, the kernel never knows which one is under it, and only when both fail does the OS fall back to memory-only (as before).

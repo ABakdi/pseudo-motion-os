@@ -1926,6 +1926,7 @@ dependencies = [
  "egui-wgpu",
  "glam",
  "log",
+ "naga",
  "pmos-abi",
  "pmos-conjure",
  "rapier3d",

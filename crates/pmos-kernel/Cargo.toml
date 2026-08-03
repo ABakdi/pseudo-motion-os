@@ -15,3 +15,8 @@ egui = { workspace = true }
 egui-wgpu = { workspace = true }
 glam = { workspace = true }
 rapier3d = { workspace = true }
+
+[dev-dependencies]
+# Shader CI: parse + validate every .wgsl at test time (they otherwise only
+# fail at runtime, on the GPU, in the browser). Version pinned to wgpu's.
+naga = { version = "29.0.4", features = ["wgsl-in"] }

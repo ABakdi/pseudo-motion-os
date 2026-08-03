@@ -6,11 +6,21 @@ struct RtUniforms {
     time: f32,
     bounces: f32,
     animate: f32,
-    _pad: f32,
+    // Live stage objects synced into the scene (count; buffer below).
+    nstage: f32,
+};
+
+// A stage prop mirrored from the physics world each frame: cubes are
+// oriented boxes (quat = body rotation), spheres are spheres; both diffuse.
+struct StageObj {
+    pos_half: vec4<f32>,    // xyz = center, w = half extent / radius
+    quat: vec4<f32>,        // body rotation (xyzw)
+    color_shape: vec4<f32>, // rgb, w = 0 cube / 1 sphere
 };
 
 @group(0) @binding(0) var<uniform> u: RtUniforms;
 @group(0) @binding(1) var out_tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(2) var<storage, read> stage: array<StageObj>;
 
 struct Sphere {
     center: vec3<f32>,
@@ -90,6 +100,43 @@ fn hit_sphere(ro: vec3<f32>, rd: vec3<f32>, s: Sphere) -> f32 {
     return -1.0;
 }
 
+fn quat_rot(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let t = 2.0 * cross(q.xyz, v);
+    return v + q.w * t + cross(q.xyz, t);
+}
+
+fn quat_conj(q: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(-q.xyz, q.w);
+}
+
+// Ray vs. oriented box: slab test in the box's local frame. Returns t
+// (<0 = miss) and writes the world-space normal.
+fn hit_box(ro: vec3<f32>, rd: vec3<f32>, o: StageObj, n_out: ptr<function, vec3<f32>>) -> f32 {
+    let qc = quat_conj(o.quat);
+    let lro = quat_rot(qc, ro - o.pos_half.xyz);
+    let lrd = quat_rot(qc, rd);
+    let h = vec3<f32>(o.pos_half.w);
+    let inv = 1.0 / lrd; // IEEE inf on axis-parallel rays — the min/max eat it
+    let ta = (-h - lro) * inv;
+    let tb = (h - lro) * inv;
+    let tmin3 = min(ta, tb);
+    let tmax3 = max(ta, tb);
+    let tn = max(max(tmin3.x, tmin3.y), tmin3.z);
+    let tf = min(min(tmax3.x, tmax3.y), tmax3.z);
+    if tn > tf || tf < 0.001 {
+        return -1.0;
+    }
+    let t = select(tf, tn, tn > 0.001);
+    var ln = vec3<f32>(0.0, 0.0, sign(-lrd.z));
+    if tn == tmin3.x {
+        ln = vec3<f32>(sign(-lrd.x), 0.0, 0.0);
+    } else if tn == tmin3.y {
+        ln = vec3<f32>(0.0, sign(-lrd.y), 0.0);
+    }
+    *n_out = quat_rot(o.quat, ln);
+    return t;
+}
+
 fn intersect(ro: vec3<f32>, rd: vec3<f32>, t: f32) -> Hit {
     var best: Hit;
     best.t = 1e9;
@@ -103,6 +150,32 @@ fn intersect(ro: vec3<f32>, rd: vec3<f32>, t: f32) -> Hit {
             best.normal = normalize(best.pos - s.center);
             best.color = s.color;
             best.kind = s.kind;
+        }
+    }
+    // Live stage objects (synced from the physics world each frame).
+    let nstage = u32(u.nstage);
+    for (var i = 0u; i < nstage; i++) {
+        let o = stage[i];
+        if o.color_shape.w > 0.5 {
+            let s = Sphere(o.pos_half.xyz, o.pos_half.w, o.color_shape.rgb, 0.0);
+            let d = hit_sphere(ro, rd, s);
+            if d > 0.0 && d < best.t {
+                best.t = d;
+                best.pos = ro + rd * d;
+                best.normal = normalize(best.pos - s.center);
+                best.color = s.color;
+                best.kind = 0.0;
+            }
+        } else {
+            var n = vec3<f32>(0.0);
+            let d = hit_box(ro, rd, o, &n);
+            if d > 0.0 && d < best.t {
+                best.t = d;
+                best.pos = ro + rd * d;
+                best.normal = n;
+                best.color = o.color_shape.rgb;
+                best.kind = 0.0;
+            }
         }
     }
     // Ground plane y = 0 with a checker.

@@ -261,6 +261,9 @@ impl Kernel {
     ) {
         self.phys.step(dt.min(0.25));
         let instances = self.phys.instances();
+        // Props are first in the instance list; notes-graph nodes follow.
+        // Only real stage objects mirror into the ray-traced scene.
+        let stage_count = self.phys.props.len();
         if let Some(gfx) = self.gfx.as_mut() {
             gfx.render(
                 primitives,
@@ -268,6 +271,7 @@ impl Kernel {
                 pixels_per_point,
                 time,
                 &instances,
+                stage_count,
             );
         }
     }
@@ -984,6 +988,27 @@ mod tests {
         k.voice_status(false, true, String::new());
         assert!(!k.voice_directives.capture);
         assert_eq!(k.voice_directives.generation, g0 + 1);
+    }
+
+    #[test]
+    fn all_shaders_parse_and_validate() {
+        // Shaders otherwise fail only at runtime, on the GPU, in the browser
+        // — this is the compile step they never had.
+        for (name, src) in [
+            ("sky", include_str!("gfx/sky.wgsl")),
+            ("floor", include_str!("gfx/floor.wgsl")),
+            ("props", include_str!("gfx/props.wgsl")),
+            ("rt", include_str!("gfx/rt.wgsl")),
+        ] {
+            let module = naga::front::wgsl::parse_str(src)
+                .unwrap_or_else(|e| panic!("{name}.wgsl parse: {}", e.emit_to_string(src)));
+            naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::all(),
+            )
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("{name}.wgsl validate: {e:?}"));
+        }
     }
 
     #[test]

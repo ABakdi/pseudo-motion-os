@@ -62,10 +62,16 @@ struct PropsPass {
 struct RayTracerPass {
     pipeline: wgpu::ComputePipeline,
     uniforms: wgpu::Buffer,
+    /// Live stage objects mirrored into the traced scene (RT_STAGE_MAX).
+    stage: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     view: wgpu::TextureView,
     egui_id: Option<egui::TextureId>,
 }
+
+/// Stage props synced into the ray tracer per frame: 3 × vec4 each.
+const RT_STAGE_MAX: usize = 64;
+const RT_STAGE_FLOATS: usize = 12;
 
 fn depth_view(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::TextureView {
     device
@@ -497,6 +503,12 @@ fn make_rt_pass(device: &wgpu::Device) -> RayTracerPass {
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    let stage = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("rt-stage"),
+        size: (RT_STAGE_MAX * RT_STAGE_FLOATS * 4) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
     let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("rt"),
         entries: &[
@@ -520,6 +532,16 @@ fn make_rt_pass(device: &wgpu::Device) -> RayTracerPass {
                 },
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -533,6 +555,10 @@ fn make_rt_pass(device: &wgpu::Device) -> RayTracerPass {
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: stage.as_entire_binding(),
             },
         ],
     });
@@ -552,6 +578,7 @@ fn make_rt_pass(device: &wgpu::Device) -> RayTracerPass {
     RayTracerPass {
         pipeline,
         uniforms,
+        stage,
         bind_group,
         view,
         egui_id: None,
@@ -677,6 +704,7 @@ impl Gfx {
         pixels_per_point: f32,
         time: f32,
         instances: &[([f32; 3], [f32; 4], u8, f32, [f32; 3])],
+        stage_count: usize,
     ) {
         use wgpu::CurrentSurfaceTexture as Cst;
         let frame = match self.surface.get_current_texture() {
@@ -736,7 +764,20 @@ impl Gfx {
                 .write_buffer(&self.props.instances, 0, cast_f32(&inst_data));
         }
 
-        // Ray tracer uniforms + dispatch.
+        // Ray tracer: mirror the live stage props into the traced scene
+        // (real objects only — the notes graph stays out), then uniforms.
+        let mut rt_stage: Vec<f32> = Vec::with_capacity(RT_STAGE_MAX * RT_STAGE_FLOATS);
+        let mut rt_n = 0u32;
+        for (pos, rot, shape, half, color) in instances.iter().take(stage_count.min(RT_STAGE_MAX)) {
+            rt_stage.extend_from_slice(&[pos[0], pos[1], pos[2], *half]);
+            rt_stage.extend_from_slice(rot);
+            rt_stage.extend_from_slice(&[color[0], color[1], color[2], *shape as f32]);
+            rt_n += 1;
+        }
+        if !rt_stage.is_empty() {
+            self.queue
+                .write_buffer(&self.rt.stage, 0, cast_f32(&rt_stage));
+        }
         self.queue.write_buffer(
             &self.rt.uniforms,
             0,
@@ -744,7 +785,7 @@ impl Gfx {
                 time,
                 self.rt_bounces as f32,
                 if self.rt_animate { 1.0 } else { 0.0 },
-                0.0,
+                rt_n as f32,
             ]),
         );
 
