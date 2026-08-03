@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 14);
+pub const ABI_VERSION: (u16, u16) = (1, 15);
 
 // ---------- handles ----------
 
@@ -249,6 +249,12 @@ pub struct AiProviderConfig {
     pub base_url: String,
     pub model: String,
     pub api_key: String,
+    /// Monthly budget in estimated tokens for REMOTE providers (ABI 1.15,
+    /// AI System spec: soft warning at 80%, hard stop at 100%; never
+    /// silently exceeded). 0 = no cap. In-browser WebLLM is free and local,
+    /// so it is never metered.
+    #[serde(default)]
+    pub monthly_cap: u32,
 }
 
 // ---------- events ----------
@@ -301,6 +307,11 @@ pub enum KernelEvent {
     /// A CSL motion sign completed (ABI 1.10) — sent to the shell.
     Sign {
         sign: CslSign,
+    },
+    /// A system notice for the shell to surface as a toast (ABI 1.15) —
+    /// e.g. the AI budget's soft warning. Informational, never modal.
+    Notice {
+        text: String,
     },
     /// Coarse gaze estimate (ABI 1.14, CSL spec §6, opt-in): screen-fraction
     /// coordinates (0..1, origin top-left), already mirrored and smoothed by

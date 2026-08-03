@@ -147,6 +147,8 @@ pub struct AppState {
     ai_base: String,
     ai_model: String,
     ai_key: String,
+    /// Monthly budget in thousands of estimated tokens (0 = no cap).
+    ai_cap_k: u32,
     // appearance (Settings → Appearance, UI spec §6.1)
     app_bg: u8,
     app_scheme: u8,
@@ -201,6 +203,7 @@ impl AppState {
             ai_base: String::new(),
             ai_model: WEBLLM_MODELS[1].1.to_string(),
             ai_key: String::new(),
+            ai_cap_k: 0,
             app_bg: 0,
             app_scheme: 0,
             appearance_loaded: false,
@@ -1377,6 +1380,19 @@ impl AppState {
                             .desired_width(240.0),
                     );
                     ui.end_row();
+
+                    // Budget (AI System spec): soft warning at 80%, hard
+                    // stop at 100% — remote requests cost real money.
+                    ui.label("Monthly budget");
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut self.ai_cap_k)
+                                .range(0..=100_000)
+                                .suffix("k tokens"),
+                        );
+                        ui.weak("estimated · 0 = no cap");
+                    });
+                    ui.end_row();
                 }
             });
         if self.ai_kind == 2 {
@@ -1392,6 +1408,7 @@ impl AppState {
                     base_url: self.ai_base.trim().to_string(),
                     model: self.ai_model.trim().to_string(),
                     api_key: self.ai_key.trim().to_string(),
+                    monthly_cap: self.ai_cap_k.saturating_mul(1000),
                 };
                 self.ai_status = match kernel.syscall(pid, Syscall::AiConfigure(cfg)) {
                     Ok(_) if self.ai_kind == 2 => {

@@ -31,6 +31,22 @@ pub struct AiState {
     /// agent id → (requesting process, accumulated reply so far).
     pub streams: HashMap<u32, (Pid, String)>,
     history: HashMap<u32, Vec<(String, String)>>,
+    /// Budget metering (AI System spec: hard caps are never silently
+    /// exceeded). Estimated tokens ≈ chars/4 — an estimate is enough for a
+    /// budget guardrail; exact counts would need provider-side accounting.
+    /// ("YYYY-MM", estimated tokens spent). Persisted by the kernel to
+    /// /settings/ai_usage.json; rolls over when `month` changes.
+    pub usage: (String, u64),
+    /// Current month ("YYYY-MM"), pushed by the platform (no clock here).
+    pub month: String,
+    /// Usage changed → the kernel persists it.
+    pub usage_dirty: bool,
+    /// A one-shot budget notice (soft warning) for the dispatcher to show.
+    pub pending_notice: Option<String>,
+    /// Agents whose in-flight stream counts toward the budget (remote only).
+    metered: std::collections::HashSet<u32>,
+    /// Soft warning latched for the current month.
+    warned: bool,
 }
 
 impl Default for AiState {
@@ -41,11 +57,18 @@ impl Default for AiState {
                 base_url: String::new(),
                 model: WEBLLM_DEFAULT_MODEL.into(),
                 api_key: String::new(),
+                monthly_cap: 0,
             }),
             config_dirty: false, // the default is not persisted until changed
             pending: Vec::new(),
             streams: HashMap::new(),
             history: HashMap::new(),
+            usage: (String::new(), 0),
+            month: String::new(),
+            usage_dirty: false,
+            pending_notice: None,
+            metered: std::collections::HashSet::new(),
+            warned: false,
         }
     }
 }
@@ -162,6 +185,43 @@ impl AiState {
             }
         };
 
+        // Budget metering (remote providers only — WebLLM is free + local).
+        // Estimated tokens ≈ chars/4 over the full outgoing body, so history
+        // and the system prompt count too, as they do on a real bill.
+        if cfg.kind != 2 {
+            if self.usage.0 != self.month {
+                self.usage = (self.month.clone(), 0);
+                self.warned = false;
+                self.usage_dirty = true;
+            }
+            let est = (req.body.len() / 4) as u64;
+            let cap = cfg.monthly_cap as u64;
+            if cap > 0 && self.usage.1 + est > cap {
+                // Hard stop (spec: never silently exceeded). Un-push the
+                // user turn so a raised cap doesn't replay a stale prompt.
+                if let Some(h) = self.history.get_mut(&agent.0) {
+                    h.pop();
+                }
+                return Err(format!(
+                    "monthly AI budget reached (~{}k of {}k est. tokens) — raise it in Settings → AI",
+                    self.usage.1 / 1000,
+                    cap / 1000
+                ));
+            }
+            self.usage.1 += est;
+            self.usage_dirty = true;
+            self.metered.insert(agent.0);
+            if cap > 0 && !self.warned && self.usage.1 * 10 >= cap * 8 {
+                self.warned = true;
+                self.pending_notice = Some(format!(
+                    "⚠ AI budget at {}% (~{}k of {}k est. tokens this month)",
+                    self.usage.1 * 100 / cap,
+                    self.usage.1 / 1000,
+                    cap / 1000
+                ));
+            }
+        }
+
         self.streams.insert(agent.0, (requester, String::new()));
         self.pending.push(req);
         Ok(())
@@ -179,6 +239,11 @@ impl AiState {
         let requester = *requester;
         if done {
             let (_, full) = self.streams.remove(&agent).unwrap();
+            // The response side of the meter (request side counted at send).
+            if self.metered.remove(&agent) {
+                self.usage.1 += (full.len() / 4) as u64;
+                self.usage_dirty = true;
+            }
             self.history
                 .entry(agent)
                 .or_default()

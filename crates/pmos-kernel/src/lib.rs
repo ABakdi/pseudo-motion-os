@@ -126,6 +126,24 @@ impl Kernel {
                 },
             );
         }
+        if done {
+            self.persist_ai_usage();
+        }
+    }
+
+    /// Write the budget meter through the VFS when it changed (the platform
+    /// mirrors /settings writes to OPFS like any other file).
+    fn persist_ai_usage(&mut self) {
+        if !self.ai.usage_dirty {
+            return;
+        }
+        self.ai.usage_dirty = false;
+        let json = serde_json::json!({
+            "month": self.ai.usage.0,
+            "used": self.ai.usage.1,
+        })
+        .to_string();
+        let _ = self.vfs.write("/settings/ai_usage.json", json.into_bytes());
     }
 
     pub fn install_gfx(&mut self, gfx: gfx::Gfx) {
@@ -719,6 +737,13 @@ impl KernelApi for Kernel {
                         },
                     );
                 }
+                // Budget bookkeeping: the soft warning surfaces as a toast,
+                // and the meter persists (hard stops changed it too).
+                if let Some(text) = self.ai.pending_notice.take() {
+                    self.ai_log(text.clone());
+                    self.push_event(proc::SHELL_PID, KernelEvent::Notice { text });
+                }
+                self.persist_ai_usage();
                 Ok(Reply::None)
             }
             Syscall::RtConfig { bounces, animate } => {
@@ -959,6 +984,88 @@ mod tests {
         k.voice_status(false, true, String::new());
         assert!(!k.voice_directives.capture);
         assert_eq!(k.voice_directives.generation, g0 + 1);
+    }
+
+    #[test]
+    fn ai_budget_meters_warns_and_hard_stops() {
+        let mut k = Kernel::new();
+        let shell = register(&mut k, "shell");
+        k.ai.month = "2026-08".into();
+        // Remote provider with a small cap (the system prompt alone is
+        // ~1.5k estimated tokens, so leave headroom for a few requests).
+        k.ai.set_config(
+            pmos_abi::AiProviderConfig {
+                kind: 1,
+                base_url: "http://localhost:1".into(),
+                model: "m".into(),
+                api_key: String::new(),
+                monthly_cap: 6000,
+            },
+            false,
+        );
+        // ~2000 chars ≈ 500 est. tokens per request (plus prompt overhead).
+        let msg = "x".repeat(2000);
+        k.syscall(
+            shell,
+            Syscall::AiPrompt {
+                agent: pmos_abi::AGENT_ASSISTANT,
+                msg: msg.clone(),
+            },
+        )
+        .unwrap();
+        assert!(k.ai.usage.1 > 0, "request side must be metered");
+        assert_eq!(k.ai.usage.0, "2026-08");
+        // Finish the stream; the reply side counts too and usage persists.
+        k.ai_chunk(pmos_abi::AGENT_ASSISTANT.0, "y".repeat(400), true);
+        let after_reply = k.ai.usage.1;
+        assert!(after_reply >= 100);
+        assert!(k.vfs.read("/settings/ai_usage.json").is_some());
+        // Drive over the cap → hard stop as a terminal ⚠ chunk.
+        let mut stopped = false;
+        for _ in 0..8 {
+            k.syscall(
+                shell,
+                Syscall::AiPrompt {
+                    agent: pmos_abi::AGENT_ASSISTANT,
+                    msg: msg.clone(),
+                },
+            )
+            .unwrap();
+            let evs = k.poll_events(shell);
+            if evs.iter().any(|e| matches!(
+                e,
+                KernelEvent::AiChunk { text, done: true, .. } if text.contains("budget")
+            )) {
+                stopped = true;
+                break;
+            }
+            k.ai_chunk(pmos_abi::AGENT_ASSISTANT.0, "ok".into(), true);
+        }
+        assert!(stopped, "the cap must hard-stop, never silently exceed");
+        // Requests are refused before exceeding; only reply-side metering
+        // can nudge past the line, and replies here are tiny.
+        assert!(k.ai.usage.1 <= 6000 + 600, "usage stops growing at the cap");
+        // The in-browser provider is never metered.
+        let before = k.ai.usage.1;
+        k.ai.set_config(
+            pmos_abi::AiProviderConfig {
+                kind: 2,
+                base_url: String::new(),
+                model: ai::WEBLLM_DEFAULT_MODEL.into(),
+                api_key: String::new(),
+                monthly_cap: 1000,
+            },
+            false,
+        );
+        k.syscall(
+            shell,
+            Syscall::AiPrompt {
+                agent: pmos_abi::AGENT_ASSISTANT,
+                msg,
+            },
+        )
+        .unwrap();
+        assert_eq!(k.ai.usage.1, before);
     }
 
     #[test]

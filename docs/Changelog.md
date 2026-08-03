@@ -12,6 +12,10 @@ Entry format:
 
 ---
 
+## [2026-08-04] — AI budget caps: never silently exceeded (ABI 1.15)
+### Code
+- **Monthly budget for remote AI providers** (deferred since M5; AI System spec: "soft warning and hard stop"): `AiProviderConfig.monthly_cap` (Settings → AI, in thousands of estimated tokens, 0 = off). The kernel meters both sides — the full outgoing body (history + system prompt, like a real bill) at send, the reply at completion — as chars/4 estimates; at 80% a one-shot ⚠ toast fires (new generic `Notice` event → shell toast), at 100% the request is refused with a terminal ⚠ chunk and the un-sent user turn is popped from history so a raised cap never replays a stale prompt. The meter persists to `/settings/ai_usage.json` and rolls over monthly (month pushed by the platform — the kernel has no clock). In-browser WebLLM is never metered: free, local, no bill to protect. New native test (metering, persistence, hard stop, WebLLM exemption).
+
 ## [2026-08-04] — Conjure `set_key`: the v1 action catalog is complete
 ### Code
 - **`set_key {target, key, value}`** (App DSL spec §7, the map-state mutation action, deferred since M5): validator accepts it, the interpreter executes it (key is a template so `set_key {key: item}` works inside `list_view` rows; the 4096-entry growth cap mirrors `push`), and the App Smith contract teaches it to the model. New native test. Every action verb in spec §7 is now implemented.

@@ -842,6 +842,7 @@ impl Shell {
                 KernelEvent::Gaze { x, y, active } => {
                     self.gaze = active.then_some(((x, y), now));
                 }
+                KernelEvent::Notice { text } => self.toast(text, now),
                 KernelEvent::Sign { sign } => match sign {
                     pmos_abi::CslSign::Record => {
                         // ✋ still hold: toggle the always-on Voice Kit.

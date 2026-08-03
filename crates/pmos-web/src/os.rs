@@ -645,6 +645,18 @@ impl OsApp {
             log::info!("vfs ready (persistent: {ok})");
             apply_voice_config(&self.kernel);
             apply_face_config(&mut self.kernel);
+            // Restore the AI budget meter (ABI 1.15).
+            if let Some(v) = self
+                .kernel
+                .vfs
+                .read("/settings/ai_usage.json")
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            {
+                self.kernel.ai.usage = (
+                    v["month"].as_str().unwrap_or("").to_string(),
+                    v["used"].as_u64().unwrap_or(0),
+                );
+            }
         }
         for op in std::mem::take(&mut self.kernel.vfs.dirty) {
             use pmos_kernel::vfs::VfsOp;
@@ -908,6 +920,8 @@ impl OsApp {
             .as_string()
             .unwrap_or_default();
         let today = today.get(..10).unwrap_or("today").to_string();
+        // The AI budget meter is monthly; the kernel has no clock (ABI 1.15).
+        kernel.ai.month = today.get(..7).unwrap_or("").to_string();
         self.egui_ctx.begin_pass(raw_input);
         shell.update(&self.egui_ctx, kernel, camera_feed, rt_tex, &today);
         let output = self.egui_ctx.end_pass();
