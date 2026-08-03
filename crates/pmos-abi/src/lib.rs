@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 12);
+pub const ABI_VERSION: (u16, u16) = (1, 13);
 
 // ---------- handles ----------
 
@@ -291,6 +291,9 @@ pub enum CslSign {
     /// Both eyes blink twice quickly (face layer, M10): accessibility
     /// click at the cursor — opt-in via Settings → Face.
     DoubleBlink,
+    /// Brows raised and held (face layer, M10): confirm the focused
+    /// dialog/consent sheet — opt-in via Settings → Face.
+    Confirm,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

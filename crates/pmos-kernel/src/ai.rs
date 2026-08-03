@@ -210,6 +210,7 @@ Tools:
 - fs_list {"path":"/notes"} — list a folder (the tree has /notes, /apps, /sys)
 - fs_read {"path":"/notes/todo.md"} — read a file
 - fs_write {"path":"/notes/idea.md","content":"..."} — create or overwrite a file (the user sees a toast)
+- fs_delete {"path":"/notes/old.md"} — DELETE a file. This shows the user a consent sheet; the result tells you whether they allowed or denied it. Never retry a denial.
 - app_open {"name":"terminal"} — open a built-in app: terminal, files, notes, settings, browser, ray tracer, hand tracker
 - web_open {"url":"https://en.wikipedia.org/wiki/Rust"} — open a page in the visible Browser window
 - web_search {"query":"quantum entanglement"} — encyclopedia search (Wikipedia; returns JSON titles+links)

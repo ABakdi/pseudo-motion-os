@@ -162,6 +162,7 @@ onmessage = async (e) => {
           blinkL: get("eyeBlinkLeft"),
           blinkR: get("eyeBlinkRight"),
           jaw: get("jawOpen"),
+          brow: get("browInnerUp"),
           chinX: chin ? chin.x : -1,
           chinY: chin ? chin.y : -1,
         });

@@ -74,7 +74,7 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 - [x] **Settings → AI** — provider/base-URL/model/masked-key form issuing `AiConfigure`; config persists across reloads (localStorage until the VFS; documented caveat). Budget caps deferred.
 - [x] **Command palette** — dock ✨ / `Ctrl+K` / 🤙 tap; three modes: fuzzy commands (app names, `demo`, `launcher`), `>` assistant chat with streaming, `make/create/build/conjure …` App Smith flow. Voice wiring deferred to M6 (with notes/whisper work).
 - [x] **App Smith loop** — generate → extract JSON → validate → auto-repair (≤2 rounds, errors+document fed back) → spawn as a real process via `ProcRegister`/`WinCreate`. Save-to-`/apps` + modify-existing deferred to M6 (VFS).
-- [ ] **Consent sheets** — deferred: conjured apps currently receive only the default capability set (requested capabilities are ignored), so no consent surface is required yet. *(Spec: [[UI#5]])*
+- [x] **Consent sheets** — shipped 2026-08-02 for Tier-2 AI actions: the assistant's new `fs_delete` tool never executes directly — a modal sheet shows what it wants, the tool loop suspends, and the user decides by button, 👍/👎 hold (G9 dialog precedence — stage bindings yield while a sheet is open), brow-raise (allow), or Esc (deny); denials are reported back to the model as final. *(Conjured-app capability consent remains future work.)*
 - *Verified in Chrome offline:* palette open (dock ✨ — new, also specced §2.2), `demo` command → pomodoro Conjure app spawned through the full validate→syscalls→App Host path, timer live (25:00 → 24:59), Start→Pause ternary re-render, toasts/notify path in place. **Real LLM streaming needs an API key — user to confirm via Settings → AI.**
 
 ## M6 — VFS & Core Apps ✅ *(core slice; deferrals annotated)*
@@ -132,7 +132,7 @@ Milestones → tasks → subtasks. `[x]` = done, `[~]` = in progress, `[ ]` = pe
 ## M10 — Face & Eyes *(research-informed, spec in [[Computer Sign Language#6]])*
 - [x] **FaceLandmarker in the gesture worker** — opt-in (Settings → Face → /settings/face.json): the face model loads lazily beside the hand model; only blendshape scores cross the worker boundary — never pixels.
 - [x] **Face-anchored signs** — the worker ships the chin landmark (one point, never pixels); with face tracking on, COMMAND only arms when the ☝ hand is near the chin — the true ASL location parameter — and falls back to anywhere without face data.
-- [x] **Face gestures (opt-in)** — **double-blink = click** and **mouth-open hold (0.6 s) = voice toggle** shipped (blink + jawOpen blendshape FSMs kernel-side). Brow-raise confirm waits for consent dialogs.
+- [x] **Face gestures (opt-in)** — **double-blink = click**, **mouth-open hold = voice toggle**, and **brow-raise = confirm the consent sheet** all shipped (blink/jaw/brow blendshape FSMs kernel-side).
 - [ ] **Gaze assist (experimental)** — iris+head-pose coarse gaze regions for window focus soft-highlight; calibrated gaze cursor stays a research track.
 
 ---

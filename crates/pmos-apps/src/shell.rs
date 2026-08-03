@@ -46,6 +46,9 @@ pub struct Shell {
     palette_voice: bool,
     /// In-flight WebFetch tool calls: request id → tool name.
     pending_web: std::collections::HashMap<u32, String>,
+    /// A Tier-2 tool call awaiting user consent (UI spec §5): the sheet is
+    /// modal — 👍/👎 take their dialog meaning while it is open.
+    consent: Option<(ToolCall, String)>,
     /// 👍/👎 hold state (G9 stage binding: add / remove-newest).
     thumbs_since: Option<f64>,
     thumbs_fired: bool,
@@ -93,6 +96,7 @@ impl Shell {
             voicekit: VoiceKit::default(),
             palette_voice: false,
             pending_web: std::collections::HashMap::new(),
+            consent: None,
             thumbs_since: None,
             thumbs_fired: false,
             thumbs_down_since: None,
@@ -146,10 +150,10 @@ impl Shell {
                 }
                 PaletteOutcome::ToolCall(call) => {
                     let (ok, result) = self.execute_tool(kernel, &call, now);
-                    if result != "__deferred__" {
+                    if result != "__deferred__" && result != "__consent__" {
                         let more = self.palette.tool_result(&call.tool, ok, &result);
                         self.handle_outcomes(more, kernel, now);
-                    } // else: the WebResult event resumes the tool loop
+                    } // else: a WebResult event or the consent sheet resumes
                 }
                 PaletteOutcome::SpawnConjure(doc) => {
                     if let Err(e) = self.spawn_conjure(kernel, &doc, now) {
@@ -230,6 +234,92 @@ impl Shell {
             },
         );
         self.toast("🗑 removed the newest object".into(), now);
+    }
+
+    /// Resolve the open consent sheet (button, 👍/👎, or brow-raise).
+    fn resolve_consent(&mut self, allow: bool, kernel: &mut dyn KernelApi, now: f64) {
+        let Some((call, summary)) = self.consent.take() else {
+            return;
+        };
+        let (ok, result) = if !allow {
+            self.toast("👎 denied".into(), now);
+            (false, "the user DENIED this action — do not retry".to_string())
+        } else {
+            match call.tool.as_str() {
+                "fs_delete" => {
+                    let path = call
+                        .args
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    match kernel.syscall(self.pid, Syscall::FsDelete { path: path.clone() }) {
+                        Ok(_) => {
+                            self.toast(format!("🗑 assistant deleted {path} (approved)"), now);
+                            (true, "deleted".to_string())
+                        }
+                        Err(e) => (false, format!("{e:?}")),
+                    }
+                }
+                _ => (false, "unknown consent action".to_string()),
+            }
+        };
+        let _ = summary;
+        let more = self.palette.tool_result(&call.tool, ok, &result);
+        self.handle_outcomes(more, kernel, now);
+    }
+
+    /// The Tier-2 consent sheet (UI spec §5): a modal card — nothing
+    /// destructive happens while it waits, and it never times out.
+    fn consent_ui(&mut self, ctx: &egui::Context, kernel: &mut dyn KernelApi, now: f64) {
+        let Some((_, summary)) = &self.consent else {
+            return;
+        };
+        let summary = summary.clone();
+        let screen = ctx.content_rect();
+        let mut decision: Option<bool> = None;
+        egui::Area::new(egui::Id::new("consent-dim"))
+            .fixed_pos(screen.min)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.allocate_response(screen.size(), egui::Sense::click());
+                ui.painter()
+                    .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(140));
+            });
+        egui::Area::new(egui::Id::new("consent-sheet"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -40.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::window(ui.style())
+                    .corner_radius(egui::CornerRadius::same(14))
+                    .inner_margin(egui::Margin::same(18))
+                    .show(ui, |ui| {
+                        ui.set_width(360.0);
+                        ui.heading("⚠ The assistant wants to…");
+                        ui.add_space(4.0);
+                        ui.label(&summary);
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            if ui
+                                .button(egui::RichText::new("👍 Allow").strong())
+                                .clicked()
+                            {
+                                decision = Some(true);
+                            }
+                            if ui.button("👎 Deny").clicked() {
+                                decision = Some(false);
+                            }
+                        });
+                        ui.add_space(4.0);
+                        ui.weak("👍 / 👎 hold · raise your brows to allow · Esc denies");
+                    });
+            });
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            decision = Some(false);
+        }
+        if let Some(allow) = decision {
+            self.resolve_consent(allow, kernel, now);
+        }
     }
 
     /// The notes-graph 2D overlay (Notes System spec): link lines + clickable
@@ -540,6 +630,18 @@ impl Shell {
                     Err(e) => (false, format!("{e:?}")),
                 }
             }
+            "fs_delete" => {
+                // Tier-2 (AI System spec §6): destructive — never executes
+                // without the consent sheet.
+                let path = arg("path");
+                if path.is_empty() {
+                    (false, "missing path".into())
+                } else {
+                    self.consent =
+                        Some((call.clone(), format!("delete the file {path}")));
+                    (true, "__consent__".into())
+                }
+            }
             "web_open" => {
                 let url = arg("url");
                 if url.is_empty() {
@@ -746,6 +848,12 @@ impl Shell {
                             self.toast("● voice capture on — hold ✋ still to stop".into(), now);
                         }
                     }
+                    pmos_abi::CslSign::Confirm => {
+                        // Brow-raise (M10, opt-in): confirm the sheet.
+                        if self.consent.is_some() {
+                            self.resolve_consent(true, kernel, now);
+                        }
+                    }
                     pmos_abi::CslSign::Cancel => {
                         // ✋ push: Esc-equivalent — close the palette, clear
                         // command arming. (The kernel already cleared focus.)
@@ -862,7 +970,12 @@ impl Shell {
             let since = *self.thumbs_since.get_or_insert(now);
             if now - since >= 0.6 && !self.thumbs_fired {
                 self.thumbs_fired = true;
-                self.stage_spawn(kernel, 0, false, now);
+                if self.consent.is_some() {
+                    // Dialog precedence (Hand Gestures G9): 👍 = allow.
+                    self.resolve_consent(true, kernel, now);
+                } else {
+                    self.stage_spawn(kernel, 0, false, now);
+                }
             }
         } else {
             self.thumbs_since = None;
@@ -872,7 +985,12 @@ impl Shell {
             let since = *self.thumbs_down_since.get_or_insert(now);
             if now - since >= 0.6 && !self.thumbs_down_fired {
                 self.thumbs_down_fired = true;
-                self.stage_remove_last(kernel, now);
+                if self.consent.is_some() {
+                    // Dialog precedence (Hand Gestures G9): 👎 = deny.
+                    self.resolve_consent(false, kernel, now);
+                } else {
+                    self.stage_remove_last(kernel, now);
+                }
             }
         } else {
             self.thumbs_down_since = None;
@@ -887,6 +1005,7 @@ impl Shell {
         let palette_outcomes = self.palette.ui(ctx);
         self.handle_outcomes(palette_outcomes, kernel, now);
         self.graph_overlay(ctx, kernel);
+        self.consent_ui(ctx, kernel, now);
         for action in self.voicekit.ui(ctx, kernel, self.pid, today) {
             match action {
                 KitAction::ToggleCapture => {

@@ -389,6 +389,8 @@ struct FaceState {
     blink_times: Vec<f64>,
     jaw_since: Option<f64>,
     jaw_fired: bool,
+    brow_since: Option<f64>,
+    brow_fired: bool,
     /// Chin landmark (camera space) + timestamp — anchors COMMAND (CSL §6).
     chin: Option<((f32, f32), f64)>,
 }
@@ -400,10 +402,27 @@ impl Kernel {
         blink_l: f32,
         blink_r: f32,
         jaw: f32,
+        brow: f32,
         chin_x: f32,
         chin_y: f32,
         now: f64,
     ) {
+        // Brow-raise held 0.4 s → Confirm (consent sheets, UI spec §5).
+        if brow > 0.5 {
+            let since = *self.face.brow_since.get_or_insert(now);
+            if now - since > 0.4 && !self.face.brow_fired {
+                self.face.brow_fired = true;
+                self.push_event(
+                    proc::SHELL_PID,
+                    KernelEvent::Sign {
+                        sign: pmos_abi::CslSign::Confirm,
+                    },
+                );
+            }
+        } else {
+            self.face.brow_since = None;
+            self.face.brow_fired = false;
+        }
         self.face.chin = if chin_x >= 0.0 {
             Some(((chin_x, chin_y), now))
         } else {

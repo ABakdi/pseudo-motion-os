@@ -12,6 +12,12 @@ Entry format:
 
 ---
 
+## [2026-08-02] — Consent sheets: Tier-2 AI actions, G9 dialogs, brow-raise confirm
+### Code
+- **Consent sheets (UI spec §5, ABI 1.13)**: the assistant gains `fs_delete` — its first Tier-2 tool — which NEVER executes directly: a modal card states what it wants ("delete the file /notes/x.md"), the tool loop suspends, and nothing happens until the user decides. Allow/Deny buttons, Esc = deny, and the sheet never times out. Denials return "the user DENIED this action — do not retry" to the model.
+- **G9 dialog precedence is real**: while a sheet is open, 👍 hold = allow and 👎 hold = deny — the stage add/remove bindings yield, exactly as the gesture spec always specified.
+- **Brow-raise confirm (M10)**: browInnerUp held 0.4 s fires the new `Confirm` sign; with a sheet open it allows. The face-gesture trio (blink-click, jaw-voice, brow-confirm) is complete, all opt-in, all blendshapes-only.
+
 ## [2026-08-02] — The notes graph goes 3D (carried since M7)
 ### Code
 - **Notes 3D graph (ABI 1.12)**: Motion Notes' 🕸 button spawns every /notes file as a gravity-free physics body floating over the stage; [[wikilinks]] become springs and a force-directed layout (springs + pairwise repulsion + a soft center anchor, applied inside the 120 Hz step) settles the cloud. `GraphLabels` projects nodes through the live camera each frame; the shell overlays link lines and clickable titles — click to open the note, pinch/click-drag a node to pull the whole graph around on its springs. Nodes are real bodies, so all camera and grab mechanics apply. `StageList` reports props only (graph nodes are notes, not stage objects).
