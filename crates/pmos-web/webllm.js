@@ -88,7 +88,7 @@
     } else {
       if (!workerBroken) {
         try {
-          engineWorker = new Worker("webllm-worker.js", { type: "module" });
+          engineWorker = new Worker("webllm-worker.js?v=116", { type: "module" });
           engine = await lib.CreateWebWorkerMLCEngine(engineWorker, model, {
             initProgressCallback: (p) => progressCb?.(p),
           });

@@ -56,7 +56,7 @@
 
   function ensureWorker() {
     if (worker || workerFailed) return;
-    worker = new Worker("whisper-worker.js", { type: "module" });
+    worker = new Worker("whisper-worker.js?v=116", { type: "module" });
     worker.onmessage = (e) => {
       const m = e.data;
       if (m.type === "progress") {

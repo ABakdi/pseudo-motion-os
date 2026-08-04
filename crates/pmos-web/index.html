@@ -138,11 +138,14 @@
     <link data-trunk rel="copy-file" href="whisper-worker.js" />
     <link data-trunk rel="copy-file" href="webllm.js" />
     <link data-trunk rel="copy-file" href="webllm-worker.js" />
-    <script src="gesture.js"></script>
-    <script src="llm.js"></script>
-    <script src="webllm.js"></script>
-    <script src="storage.js"></script>
-    <script src="speech.js"></script>
+    <!-- ?v= busts the Pages/browser cache for these unhashed files — a stale
+         gesture.js against a new wasm silently breaks the face pipeline.
+         Bump PMOS_JS_V (here and in the worker URLs) whenever they change. -->
+    <script src="gesture.js?v=116"></script>
+    <script src="llm.js?v=116"></script>
+    <script src="webllm.js?v=116"></script>
+    <script src="storage.js?v=116"></script>
+    <script src="speech.js?v=116"></script>
 
     <!-- Backdrop -->
     <canvas id="starfield" aria-hidden="true"></canvas>

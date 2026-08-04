@@ -234,6 +234,11 @@ impl Kernel {
         }
     }
 
+    /// A system notice → shell toast (ABI 1.15) — e.g. face-engine status.
+    pub fn notice(&mut self, text: String) {
+        self.push_event(proc::SHELL_PID, KernelEvent::Notice { text });
+    }
+
     /// Face mesh frame → viewer overlay (ABI 1.16). Same policy as raw hand
     /// landmarks: only while the viewer is open, only to InputRawHands.
     pub fn face_mesh(&mut self, data: Vec<f32>) {

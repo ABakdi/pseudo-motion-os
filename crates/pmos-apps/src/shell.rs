@@ -1101,21 +1101,20 @@ impl Shell {
             screen.min.x + fx.clamp(0.0, 1.0) * screen.width(),
             screen.min.y + fy.clamp(0.0, 1.0) * screen.height(),
         );
-        // Debug affordance: while the Hand Tracker is open, the estimate is
-        // visible on screen as a soft halo — otherwise "is it working?" is
-        // unanswerable, since the highlight needs a window under the gaze.
-        if self.is_open(AppKind::HandTracker) {
-            let p = ctx.layer_painter(egui::LayerId::new(
-                egui::Order::Background,
-                egui::Id::new("gaze-halo"),
-            ));
-            p.circle_filled(pos, 46.0, theme::accent_b().gamma_multiply(0.10));
-            p.circle_stroke(
-                pos,
-                46.0,
-                egui::Stroke::new(1.5, theme::accent_b().gamma_multiply(0.4)),
-            );
-        }
+        // The halo: gaze assist is its own opt-in, and an estimate you can't
+        // see is indistinguishable from a dead feature — so while gaze is
+        // active the soft halo always shows where the OS thinks you look.
+        // Deliberately big and dim: region feedback, not a cursor.
+        let p = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Background,
+            egui::Id::new("gaze-halo"),
+        ));
+        p.circle_filled(pos, 46.0, theme::accent_b().gamma_multiply(0.10));
+        p.circle_stroke(
+            pos,
+            46.0,
+            egui::Stroke::new(1.5, theme::accent_b().gamma_multiply(0.4)),
+        );
         let Some(layer) = ctx.layer_id_at(pos) else {
             return;
         };

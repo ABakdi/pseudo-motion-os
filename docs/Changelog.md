@@ -12,6 +12,14 @@ Entry format:
 
 ---
 
+## [2026-08-04] — Face pipeline hardening: stale-cache fix, CPU fallback, visible status
+### Code
+- **Root cause of "enabled it but nothing happens" found by live-debugging the deployed site**: the unhashed JS files (`gesture.js`, workers…) are cached by GitHub Pages/browsers for up to 10 minutes — a stale `gesture.js` calling the old 6-arg `pmos_face_frame` against the new wasm silently killed gaze (NaN coordinates) and never shipped the mesh. All unhashed script/worker URLs now carry a `?v=` cache-buster that gets bumped when they change.
+- **Face model CPU fallback**: the FaceLandmarker only ever tried the GPU delegate — machines that can't create a second GPU context lost the whole face layer silently. It now falls back to CPU exactly like the hand model.
+- **No more silent face failures**: the worker posts a `faceStatus` message; the OS toasts "😊 face tracking ready" or "⚠ face tracking failed: <why>" so a broken model load is visible instead of indistinguishable from "not looking at the camera".
+- **The gaze halo now always shows while gaze assist is on** (was: only while the Hand Tracker was open) — the feature is opt-in, and an estimate you can't see is indistinguishable from a dead feature.
+- *Verified in Chrome on the deployed build*: synthetic face mesh renders in the tracker with iris highlights, the mini-map reads the exact injected coordinates (mirroring correct), and the on-screen halo tracks them.
+
 ## [2026-08-04] — Hand Tracker shows the face mesh & eyes; gaze becomes visible (ABI 1.16)
 ### Code
 - **Face mesh in the viewer** (user report: gaze felt dead — there was no way to see what the eye tracker saw): the gesture worker now ships the full 478-point face mesh alongside the blendshapes (landmarks only — never pixels); the kernel forwards it as `RawFace` events under the exact `RawHands` policy (viewer open + `InputRawHands`); the Hand Tracker draws the dim point cloud with **iris centers and rims highlighted** over the preview, with a "Show face mesh + eyes" toggle. Stale meshes (>1 s) aren't drawn — a frozen mesh reads as tracked.

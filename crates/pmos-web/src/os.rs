@@ -75,6 +75,7 @@ thread_local! {
     static WEB_RESULTS: RefCell<Vec<(u32, bool, String)>> = const { RefCell::new(Vec::new()) };
     static FACE_FRAME: RefCell<Option<[f32; 8]>> = const { RefCell::new(None) };
     static FACE_MESH: RefCell<Option<Vec<f32>>> = const { RefCell::new(None) };
+    static FACE_STATUS: RefCell<Option<(bool, String)>> = const { RefCell::new(None) };
     static MIC_GRANTED: RefCell<bool> = const { RefCell::new(false) };
     static VOICE_TRANSCRIPTS: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
     static VFS_LOADED: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
@@ -215,6 +216,13 @@ pub fn pmos_face_frame(
 #[wasm_bindgen]
 pub fn pmos_face_mesh(data: Vec<f32>) {
     FACE_MESH.with(|f| *f.borrow_mut() = Some(data));
+}
+
+/// Face engine status from the worker: model loaded, or why it couldn't.
+/// Failures used to be silent — now they surface as a toast.
+#[wasm_bindgen]
+pub fn pmos_face_status(ok: bool, msg: String) {
+    FACE_STATUS.with(|f| *f.borrow_mut() = Some((ok, msg)));
 }
 
 /// Preview pixels for the Hand Tracker viewer (RGBA, mirrored). These go
@@ -621,6 +629,13 @@ impl OsApp {
         }
         if let Some(mesh) = FACE_MESH.with(|f| f.borrow_mut().take()) {
             self.kernel.face_mesh(mesh);
+        }
+        if let Some((ok, msg)) = FACE_STATUS.with(|f| f.borrow_mut().take()) {
+            self.kernel.notice(if ok {
+                "😊 face tracking ready".to_string()
+            } else {
+                format!("⚠ face tracking failed: {msg}")
+            });
         }
         // Machine-probed LLM tier: surface via /sys/llm_tier, and — when the
         // user never saved an AI config — fit the default model to the tier.

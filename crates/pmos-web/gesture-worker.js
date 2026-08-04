@@ -98,20 +98,31 @@ let faceBuilding = false;
 async function ensureFace() {
   if (faceLandmarker || faceBuilding || !faceWanted || !fileset || !FaceLandmarkerClass) return;
   faceBuilding = true;
+  const cfg = (delegate) => ({
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+      delegate,
+    },
+    runningMode: "VIDEO",
+    numFaces: 1,
+    outputFaceBlendshapes: true,
+  });
   try {
-    faceLandmarker = await FaceLandmarkerClass.createFromOptions(fileset, {
-      baseOptions: {
-        modelAssetPath:
-          "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-        delegate: "GPU",
-      },
-      runningMode: "VIDEO",
-      numFaces: 1,
-      outputFaceBlendshapes: true,
-    });
+    try {
+      faceLandmarker = await FaceLandmarkerClass.createFromOptions(fileset, cfg("GPU"));
+    } catch (gpuErr) {
+      // Same fallback the hand model gets — some machines can't create a
+      // second GPU delegate context.
+      console.warn("[pmos gesture-worker] face GPU delegate failed, using CPU:", gpuErr);
+      faceLandmarker = await FaceLandmarkerClass.createFromOptions(fileset, cfg("CPU"));
+    }
     console.log("[pmos gesture-worker] face landmarker ready");
+    postMessage({ type: "faceStatus", ok: true, msg: "" });
   } catch (err) {
+    // Never fail silently — the main thread surfaces this to the user.
     console.warn("[pmos gesture-worker] face model failed:", err);
+    postMessage({ type: "faceStatus", ok: false, msg: String(err) });
     faceWanted = false;
   }
   faceBuilding = false;
