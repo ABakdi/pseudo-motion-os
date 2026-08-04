@@ -81,6 +81,9 @@ async function reconfigure(opts) {
     postMessage({ type: "error", message: String(e) });
   }
   building = false;
+  // A face request that arrived while the vision module was still importing
+  // found `fileset` null and bailed; now that we're loaded, honour it.
+  ensureFace();
   if (pendingCfg) {
     const next = pendingCfg;
     pendingCfg = null;

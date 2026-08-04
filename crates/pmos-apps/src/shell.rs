@@ -74,6 +74,10 @@ pub struct Shell {
     /// 9-point gaze calibration overlay: (target index, phase start time,
     /// kernel's sample count — 0 while stuck = face isn't tracked).
     calib: Option<(usize, f64, u32)>,
+    /// Last face-pipeline notice + how many face frames have arrived —
+    /// the Hand Tracker shows both as the face/gaze health line.
+    face_note: String,
+    face_frames: u32,
 }
 
 impl Shell {
@@ -120,6 +124,8 @@ impl Shell {
             appearance_tries: 0,
             gaze: None,
             calib: None,
+            face_note: String::new(),
+            face_frames: 0,
         }
     }
 
@@ -825,7 +831,10 @@ impl Shell {
                     self.cursor.camera_reason = reason;
                 }
                 KernelEvent::RawHands { data, hands } => self.raw_hands = (data, hands),
-                KernelEvent::RawFace { data } => self.raw_face = (data, now),
+                KernelEvent::RawFace { data } => {
+                    self.raw_face = (data, now);
+                    self.face_frames = self.face_frames.saturating_add(1);
+                }
                 KernelEvent::AiChunk { agent, text, done } => {
                     let outcomes = self.palette.on_chunk(agent, &text, done);
                     ai_outcomes.extend(outcomes);
@@ -851,7 +860,14 @@ impl Shell {
                 KernelEvent::Gaze { x, y, active } => {
                     self.gaze = active.then_some(((x, y), now));
                 }
-                KernelEvent::Notice { text } => self.toast(text, now),
+                KernelEvent::Notice { text } => {
+                    // Face-pipeline notices double as the Hand Tracker's
+                    // health line, so the user can see which link is down.
+                    if text.contains("face tracking") {
+                        self.face_note = text.clone();
+                    }
+                    self.toast(text, now);
+                }
                 KernelEvent::Sign { sign } => match sign {
                     pmos_abi::CslSign::Record => {
                         // ✋ still hold: toggle the always-on Voice Kit.
@@ -1364,6 +1380,8 @@ impl Shell {
             Vec::new()
         };
         let gaze_now = self.gaze.map(|(g, _)| g);
+        let face_note = self.face_note.clone();
+        let face_frames = self.face_frames;
         let cam_on = self.cursor.camera_enabled;
         let cam_reason = self.cursor.camera_reason.clone();
         let tracking = self.cursor.tracking;
@@ -1407,6 +1425,7 @@ impl Shell {
                         &raw,
                         &rawface,
                         gaze_now,
+                        (&face_note, face_frames),
                         cam_on,
                         &cam_reason,
                         tracking,

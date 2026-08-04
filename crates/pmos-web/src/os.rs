@@ -344,10 +344,12 @@ fn dispatch_web_fetch(id: u32, url: &str) {
     }
 }
 
-/// Push face-tracking preferences (/settings/face.json) to gesture.js —
-/// the face model only runs when the user opts in (Settings → Face).
-/// Also gates the kernel's gaze pipeline (gaze assist is its own opt-in).
-fn apply_face_config(kernel: &mut pmos_kernel::Kernel) {
+/// Read face preferences (/settings/face.json) into the kernel and return
+/// whether face tracking is wanted. The actual push to JS is a *directive*
+/// retried until the worker acknowledges (see `frame`) — the original
+/// one-shot call was silently lost whenever the gesture worker wasn't alive
+/// yet, which is exactly the "checkbox does nothing" the user hit.
+fn read_face_config(kernel: &mut pmos_kernel::Kernel) -> bool {
     let cfg = kernel
         .vfs
         .read("/settings/face.json")
@@ -361,12 +363,20 @@ fn apply_face_config(kernel: &mut pmos_kernel::Kernel) {
             .as_ref()
             .and_then(|v| v.get("gaze").and_then(|e| e.as_bool()))
             .unwrap_or(false);
-    let Some(win) = web_sys::window() else { return };
+    enabled
+}
+
+/// Push the face-tracking request to gesture.js. Returns false when the
+/// bridge isn't there yet, so the caller can retry.
+fn push_face_config(enabled: bool) -> bool {
+    let Some(win) = web_sys::window() else {
+        return false;
+    };
     let Ok(g) = js_sys::Reflect::get(&win, &JsValue::from_str("pmosGestures")) else {
-        return;
+        return false;
     };
     if g.is_undefined() {
-        return;
+        return false;
     }
     if let Ok(f) = js_sys::Reflect::get(&g, &JsValue::from_str("configure")) {
         if let Some(f) = f.dyn_ref::<js_sys::Function>() {
@@ -376,9 +386,10 @@ fn apply_face_config(kernel: &mut pmos_kernel::Kernel) {
                 &JsValue::from_str("face"),
                 &JsValue::from_bool(enabled),
             );
-            let _ = f.call1(&g, &opts);
+            return f.call1(&g, &opts).is_ok();
         }
     }
+    false
 }
 
 /// Apply the kernel voice directive to speech.js (start/stop capture).
@@ -466,6 +477,12 @@ struct OsApp {
     /// Last hand cursor position forwarded to egui (sub-point jitter from a
     /// resting hand would otherwise fight the mouse for the pointer).
     last_hand_move: Option<[f32; 2]>,
+    /// Face-tracking directive: what the settings ask for, whether the
+    /// worker has acknowledged it, and when we last pushed. Retried until
+    /// acknowledged — a one-shot push is lost if the worker isn't up yet.
+    face_want: bool,
+    face_ack: bool,
+    face_push_at: f64,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -524,6 +541,9 @@ impl OsApp {
             pinch_press: None,
             voice_autostarted: false,
             last_hand_move: None,
+            face_want: false,
+            face_ack: true,
+            face_push_at: -10.0,
         }
     }
 
@@ -644,11 +664,23 @@ impl OsApp {
             self.kernel.face_mesh(mesh);
         }
         if let Some((ok, msg)) = FACE_STATUS.with(|f| f.borrow_mut().take()) {
+            self.face_ack = ok; // failure keeps the directive retrying
             self.kernel.notice(if ok {
                 "😊 face tracking ready".to_string()
             } else {
                 format!("⚠ face tracking failed: {msg}")
             });
+        }
+        // Face directive: keep asking until the worker acknowledges. This
+        // survives the worker not existing yet, a late camera grant, and a
+        // worker rebuild — all of which silently swallowed the old
+        // fire-and-forget push ("the checkbox does nothing").
+        if !self.face_ack && now - self.face_push_at > 1.5 {
+            self.face_push_at = now;
+            let sent = push_face_config(self.face_want);
+            if sent && !self.face_want {
+                self.face_ack = true; // turning off needs no confirmation
+            }
         }
         // Machine-probed LLM tier: surface via /sys/llm_tier, and — when the
         // user never saved an AI config — fit the default model to the tier.
@@ -684,7 +716,11 @@ impl OsApp {
             self.kernel.vfs.ready = true;
             log::info!("vfs ready (persistent: {ok})");
             apply_voice_config(&self.kernel);
-            apply_face_config(&mut self.kernel);
+            let want = read_face_config(&mut self.kernel);
+            if want != self.face_want {
+                self.face_want = want;
+                self.face_ack = false;
+            }
             // Restore the per-user gaze calibration (ABI 1.17).
             if let Some(c) = self
                 .kernel
@@ -716,7 +752,16 @@ impl OsApp {
                         apply_voice_config(&self.kernel);
                     }
                     if path == "/settings/face.json" {
-                        apply_face_config(&mut self.kernel);
+                        // Settings → Face changed: re-read and re-arm the
+                        // directive so it pushes (and keeps retrying).
+                        self.face_want = read_face_config(&mut self.kernel);
+                        self.face_ack = false;
+                        self.face_push_at = -10.0;
+                        self.kernel.notice(if self.face_want {
+                            "requesting face tracking…".into()
+                        } else {
+                            "face tracking off".to_string()
+                        });
                     }
                     let arr = js_sys::Array::of2(
                         &JsValue::from_str(&path),

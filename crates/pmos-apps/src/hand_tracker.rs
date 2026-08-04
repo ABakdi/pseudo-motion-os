@@ -81,6 +81,9 @@ impl HandTrackerState {
         raw: &(Vec<f32>, u8),
         face: &[f32],
         gaze: Option<(f32, f32)>,
+        // (last face-pipeline notice, face frames received) — the health
+        // line that makes a broken face chain diagnosable at a glance.
+        face_health: (&str, u32),
         camera_enabled: bool,
         camera_reason: &str,
         tracking: bool,
@@ -230,6 +233,23 @@ impl HandTrackerState {
 
         ui.add_space(4.0);
         ui.separator();
+
+        // ---------- face pipeline health ----------
+        // Each link, visible: requested → model loaded → frames arriving.
+        let (note, frames) = face_health;
+        ui.horizontal(|ui| {
+            ui.weak("face:");
+            if frames > 0 {
+                ui.colored_label(theme::accent_a(), format!("● tracking ({frames} frames)"));
+            } else if note.is_empty() {
+                ui.weak("not requested — enable it in Settings → Face");
+            } else {
+                ui.colored_label(
+                    egui::Color32::from_rgb(0xff, 0x9d, 0x6b),
+                    format!("{note} · no frames yet"),
+                );
+            }
+        });
 
         // ---------- gaze debug (CSL spec §6) ----------
         // A mini-map of the screen with the live gaze estimate: the honest

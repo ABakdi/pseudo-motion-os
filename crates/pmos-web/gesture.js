@@ -51,7 +51,7 @@
       video.srcObject = stream;
       await video.play();
 
-      worker = new Worker("gesture-worker.js?v=117", { type: "module" });
+      worker = new Worker("gesture-worker.js?v=119", { type: "module" });
       worker.onmessage = (e) => {
         const m = e.data;
         if (m.type === "ready") {

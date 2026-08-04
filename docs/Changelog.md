@@ -12,6 +12,13 @@ Entry format:
 
 ---
 
+## [2026-08-04] — Face tracking becomes a retried directive (the "checkbox does nothing" fix)
+### Code
+- **Root cause**: enabling face tracking was a **fire-and-forget push**. `apply_face_config` called `pmosGestures.configure({face:true})` exactly once — at VFS-ready or on a `/settings/face.json` write. If the gesture worker wasn't alive at that instant (camera still being granted, worker still importing the vision module, worker rebuilt after a tuning change), the request was **silently swallowed with no retry**, so the face model never loaded: no mesh, no gaze, and calibration collected zero samples ("face was lost"). Voice and hands never had this bug because they use directives with generation counters; face now does too: the platform keeps re-pushing every 1.5 s until the worker acknowledges via `faceStatus`, and re-arms on every settings change.
+- **Worker-side retry**: a `face` message that arrived before `FilesetResolver` finished importing found `fileset` null and bailed forever; the init path now calls `ensureFace()` once loaded.
+- **Face health is visible**: the Hand Tracker gained a `face:` line showing exactly which link is down — *not requested* → *requesting…* → *ready · no frames yet* (model up, no face in view) → *● tracking (N frames)*. Toggling the setting toasts "requesting face tracking…" so the checkbox→kernel link is observable too.
+- *Verified locally against a fresh build with a synthetic camera*: with `{"enabled":true,"gaze":true}` saved, boot now loads the face model unprompted — "😊 face tracking ready" — where before nothing happened at all.
+
 ## [2026-08-04] — Boot-race fix: settings now actually restore ("gaze never turns on automatically")
 ### Code
 - **Root cause found (witnessed live, finally explained)**: the kernel calls `pmosStorage.loadAll` from its first frames — which can run **before trunk assigns `window.wasmBindings`** (the winit event loop starts inside wasm init). The walk threw on the missing binding, the error callback threw on the same missing binding, and the whole boot load died as a **silent unhandled rejection**: no `vfs ready`, no settings restored — face/gaze/appearance/voice all silently off after a reload. `loadAll` now waits for the bindings (up to 10 s) before touching them. This was intermittent (timing), which is why some boots worked.
