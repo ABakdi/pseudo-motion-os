@@ -105,6 +105,10 @@ impl AppKind {
 /// Actions an app hands back to the shell after its frame.
 pub enum AppAction {
     LaunchConjure(String),
+    /// Open the 9-point gaze calibration overlay (Settings → Face).
+    CalibrateGaze,
+    /// Forget the stored gaze calibration.
+    ResetGazeCalib,
 }
 
 /// In-browser AI performance tiers (WebLLM prebuilt model ids, ABI 1.6).
@@ -1292,7 +1296,12 @@ impl AppState {
 
     /// Settings window body — drawn by the shell so it can reach the kernel
     /// (the AI provider form issues `AiConfigure`).
-    pub fn settings_ui(&mut self, ui: &mut egui::Ui, kernel: &mut dyn KernelApi, pid: Pid) {
+    pub fn settings_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        kernel: &mut dyn KernelApi,
+        pid: Pid,
+    ) -> Option<AppAction> {
         ui.heading("AI provider");
         ui.add_space(4.0);
         egui::Grid::new("ai-cfg")
@@ -1428,7 +1437,7 @@ impl AppState {
         self.appearance_ui(ui, kernel, pid);
         ui.add_space(10.0);
         ui.separator();
-        self.voice_ui(ui, kernel, pid);
+        let action = self.voice_ui(ui, kernel, pid);
         ui.add_space(10.0);
         ui.separator();
         self.stage_ui(ui, kernel, pid);
@@ -1438,12 +1447,18 @@ impl AppState {
         ui.weak("Mouse: drag = orbit · wheel = zoom · shift/middle-drag = pan · click-drag object = grab · Home = reset");
         ui.weak("Hands: 👌 click/grab objects (tap = select) · ✊ orbit + drag windows · ✌ scroll/zoom (edits selection) · two ✋ = zoom");
         ui.weak("Signs: ✋ hold = voice on/off · ✋ push = cancel · ☝ hold (near chin) = ⌘ command · 👍/👎 = add/remove cube");
+        action
     }
 
     /// Settings → Voice: Whisper model size (deferred item from the voice
     /// milestone) — persisted to /settings/voice.json; the platform applies
     /// it to the speech engine (takes effect on the next voice session).
-    fn voice_ui(&mut self, ui: &mut egui::Ui, kernel: &mut dyn KernelApi, pid: Pid) {
+    fn voice_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        kernel: &mut dyn KernelApi,
+        pid: Pid,
+    ) -> Option<AppAction> {
         const PATH: &str = "/settings/voice.json";
         const MODELS: &[(&str, &str)] = &[
             ("tiny", "Fast — ~40 MB, fine for commands"),
@@ -1528,9 +1543,25 @@ impl AppState {
             );
         }
         ui.weak("face landmarks only, computed on this machine — video never leaves the camera pipeline");
+        let mut action = None;
         if self.face_gaze {
-            ui.weak("gaze is region-accurate (thirds of the screen), not a cursor — it highlights, never clicks");
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .button("🎯 Calibrate gaze")
+                    .on_hover_text("9 dots, ~15 seconds — fits eye tracking to YOUR screen and face")
+                    .clicked()
+                {
+                    action = Some(AppAction::CalibrateGaze);
+                }
+                if ui.button("Reset calibration").clicked() {
+                    action = Some(AppAction::ResetGazeCalib);
+                }
+            });
+            ui.weak("uncalibrated, gaze is region-accurate (thirds of the screen);");
+            ui.weak("calibrated, it tracks to a few percent — redo it if you move your setup");
         }
+        action
     }
 
     /// Settings → Stage (ABI 1.8): spawn/clear physics objects, sun control.

@@ -128,33 +128,46 @@ async function ensureFace() {
   faceBuilding = false;
 }
 
-// Coarse gaze estimate (CSL spec §6, honest limits): head pose dominates,
-// eye-in-head refines. Iris centers (468/473) between the eye corners give
-// the eye component; the nose tip against the eye line gives yaw/pitch.
-// Output is camera-image-normalized [0,1] — the kernel mirrors and smooths.
-// This is REGION accuracy (thirds/quadrants), never a cursor.
-function gazeEstimate(lm, get) {
+// Gaze features (CSL spec §6): the raw per-frame signal for both the coarse
+// heuristic AND the calibrated per-user regression (research-backed design:
+// WebGazer-class accuracy comes from calibration over iris+head features,
+// not from a heavier model). Camera-image space, unmirrored — the kernel's
+// calibrated regression maps directly to the user's actual screen.
+function gazeFeatures(lm, get) {
   const irisR = lm[468], irisL = lm[473];
   const rOut = lm[33], rIn = lm[133]; // right eye corners (image-left)
   const lIn = lm[362], lOut = lm[263]; // left eye corners (image-right)
+  const rTop = lm[159], rBot = lm[145]; // right eyelids
+  const lTop = lm[386], lBot = lm[374]; // left eyelids
   const nose = lm[1];
-  if (!irisR || !irisL || !rOut || !lOut || !nose) return [-1, -1];
-  // Eye-in-head horizontal: iris position across each eye's corner span.
-  const ratio = (p, a, b) => (b.x - a.x !== 0 ? (p.x - a.x) / (b.x - a.x) : 0.5);
-  const hx = (ratio(irisR, rOut, rIn) + ratio(irisL, lIn, lOut)) / 2;
-  // Head pose proxy: nose tip against the inter-ocular line.
+  if (!irisR || !irisL || !rOut || !lOut || !nose || !rTop || !lTop) return null;
+  const ratio = (v, a, b) => (b - a !== 0 ? (v - a) / (b - a) : 0.5);
+  const hxR = ratio(irisR.x, rOut.x, rIn.x);
+  const hxL = ratio(irisL.x, lIn.x, lOut.x);
+  const vyR = ratio(irisR.y, rTop.y, rBot.y);
+  const vyL = ratio(irisL.y, lTop.y, lBot.y);
   const midX = (rOut.x + lOut.x) / 2;
   const midY = (rOut.y + lOut.y) / 2;
   const eyeDist = Math.hypot(lOut.x - rOut.x, lOut.y - rOut.y) || 1;
-  const yaw = (nose.x - midX) / eyeDist; // ~0 facing camera
-  const pitch = (nose.y - midY) / eyeDist; // ~0.55 neutral (nose below eyes)
-  // Eye-in-head vertical: blendshapes are steadier than iris-vs-eyelid.
+  const yaw = (nose.x - midX) / eyeDist;
+  const pitch = (nose.y - midY) / eyeDist;
+  const roll = Math.atan2(lOut.y - rOut.y, lOut.x - rOut.x);
+  const lookH =
+    (get("eyeLookOutLeft") + get("eyeLookInRight")) / 2 -
+    (get("eyeLookInLeft") + get("eyeLookOutRight")) / 2;
   const lookV =
     (get("eyeLookDownLeft") + get("eyeLookDownRight")) / 2 -
     (get("eyeLookUpLeft") + get("eyeLookUpRight")) / 2;
+  return [hxR, hxL, vyR, vyL, yaw, pitch, lookH, lookV, nose.x, nose.y, eyeDist, roll];
+}
+
+// Coarse heuristic from the features — the uncalibrated fallback. Region
+// accuracy only; the calibrated regression replaces it entirely.
+function gazeEstimate(f) {
+  const [hxR, hxL, , , yaw, pitch] = f;
+  const hx = (hxR + hxL) / 2;
+  const lookV = f[7];
   const clamp = (v) => Math.min(1, Math.max(0, v));
-  // Eye-in-head weighted heavily: iris travel is only ~±0.15 of the corner
-  // span, but "move your eyes across the screen" must sweep the estimate.
   const gx = clamp(0.5 + yaw * 1.4 + (hx - 0.5) * 3.0);
   const gy = clamp(0.5 + (pitch - 0.55) * 1.3 + lookV * 1.0);
   return [gx, gy];
@@ -201,7 +214,8 @@ onmessage = async (e) => {
         const get = (n) => cats.find((c) => c.categoryName === n)?.score ?? 0;
         const lm = fr.faceLandmarks?.[0];
         const chin = lm?.[152]; // canonical chin point
-        const [gx, gy] = lm ? gazeEstimate(lm, get) : [-1, -1];
+        const feat = lm ? gazeFeatures(lm, get) : null;
+        const [gx, gy] = feat ? gazeEstimate(feat) : [-1, -1];
         // Full mesh for the viewer overlay (landmarks only — never pixels);
         // the kernel drops it unless the Hand Tracker viewer is open.
         let mesh = null;
@@ -224,6 +238,7 @@ onmessage = async (e) => {
             chinY: chin ? chin.y : -1,
             gazeX: gx,
             gazeY: gy,
+            feat: feat ? new Float32Array(feat) : null,
             mesh,
           },
           mesh ? [mesh.buffer] : []

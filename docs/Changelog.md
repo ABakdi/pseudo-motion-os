@@ -12,6 +12,16 @@ Entry format:
 
 ---
 
+## [2026-08-04] — Calibrated gaze: from thirds-of-the-screen to a few percent (ABI 1.17)
+### Code
+- **Research first** (user asked for a specialized, maximally accurate free model): WebGazer reaches ~4°/100–150 px via a self-calibrating regression over eye features; L2CS-Net (deep CNN, ONNX-in-browser) reaches 3.9° but costs ~90 MB + 15–20 fps of GPU **and still needs calibration to map to the screen**; the best MediaPipe results use iris landmarks + per-user calibration + regression. Conclusion: we already run the right model — the missing piece was **calibration**.
+- **Gaze feature vector**: the worker now extracts 12 features per face frame (iris-in-eye ratios horizontal+vertical per eye, head yaw/pitch proxies, eyeLook blendshape pair, head position, inter-ocular distance, eye-line roll) — the same scalars-only privacy boundary.
+- **9-point calibration overlay** (`GazeCalib` syscalls, `InputRawHands`-gated): Settings → Face → 🎯 — follow the pulsing dot (~15 s, Esc cancels); every collect-phase frame records features against the dot's true position; the kernel fits a per-user **ridge regression** (bias + features + interaction/quadratic terms, normal equations with partial pivoting in f64, `input/gaze.rs`), toasts the mean error, persists to `/settings/gaze_calib.json` and reloads it at boot. Calibrated prediction replaces the heuristic entirely; Reset reverts. 3 new native tests (fit recovery, starved/broken input, syscall-level end-to-end incl. capability gating and persistence).
+- **Fixed on the way**: the window-action drain had been lost in a refactor — ▶ Launch of `.conjure` apps from Files and the Terminal silently did nothing; restored (same class of bug as the old `browser_view` drop, now with a comment naming the lesson).
+
+### Specs
+- [[Computer Sign Language]] §6: calibrated gaze documented (design, honest limits); [[Todo]] M10 updated.
+
 ## [2026-08-04] — Face pipeline hardening: stale-cache fix, CPU fallback, visible status
 ### Code
 - **Root cause of "enabled it but nothing happens" found by live-debugging the deployed site**: the unhashed JS files (`gesture.js`, workers…) are cached by GitHub Pages/browsers for up to 10 minutes — a stale `gesture.js` calling the old 6-arg `pmos_face_frame` against the new wasm silently killed gaze (NaN coordinates) and never shipped the mesh. All unhashed script/worker URLs now carry a `?v=` cache-buster that gets bumped when they change.

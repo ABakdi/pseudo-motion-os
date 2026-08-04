@@ -1930,6 +1930,7 @@ dependencies = [
  "pmos-abi",
  "pmos-conjure",
  "rapier3d",
+ "serde",
  "serde_json",
 ]
 

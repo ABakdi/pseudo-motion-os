@@ -71,6 +71,8 @@ pub struct Shell {
     /// Latest gaze estimate (screen fractions) + arrival time (CSL §6):
     /// soft-highlights the window under the gaze, expires when stale.
     gaze: Option<((f32, f32), f64)>,
+    /// 9-point gaze calibration overlay: (target index, phase start time).
+    calib: Option<(usize, f64)>,
 }
 
 impl Shell {
@@ -116,6 +118,7 @@ impl Shell {
             appearance_done: false,
             appearance_tries: 0,
             gaze: None,
+            calib: None,
         }
     }
 
@@ -1020,6 +1023,7 @@ impl Shell {
         self.handle_outcomes(palette_outcomes, kernel, now);
         self.graph_overlay(ctx, kernel);
         self.consent_ui(ctx, kernel, now);
+        self.calib_ui(ctx, kernel, now);
         for action in self.voicekit.ui(ctx, kernel, self.pid, today) {
             match action {
                 KitAction::ToggleCapture => {
@@ -1083,10 +1087,104 @@ impl Shell {
         }
     }
 
+    /// The 9-point gaze calibration overlay (CSL spec §6, ABI 1.17): look
+    /// at each dot; while it pulses, every frame's face features are
+    /// recorded against the dot's true position; at the end the kernel fits
+    /// the per-user regression. ~15 seconds total. Esc cancels.
+    fn calib_ui(&mut self, ctx: &egui::Context, kernel: &mut dyn KernelApi, now: f64) {
+        const GRID: [(f32, f32); 9] = [
+            (0.5, 0.5), // center first — lets the user settle in
+            (0.08, 0.08),
+            (0.5, 0.08),
+            (0.92, 0.08),
+            (0.08, 0.5),
+            (0.92, 0.5),
+            (0.08, 0.92),
+            (0.5, 0.92),
+            (0.92, 0.92),
+        ];
+        const SETTLE: f64 = 0.6; // eye travel + saccade settle
+        const COLLECT: f64 = 0.9; // sampling window
+        let Some((idx, since)) = self.calib else {
+            return;
+        };
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.calib = None;
+            let _ = kernel.syscall(self.pid, Syscall::GazeCalib(pmos_abi::GazeCalibOp::Cancel));
+            self.toast("gaze calibration cancelled".into(), now);
+            return;
+        }
+        let screen = ctx.content_rect();
+        let (fx, fy) = GRID[idx];
+        let pos = egui::pos2(
+            screen.min.x + fx * screen.width(),
+            screen.min.y + fy * screen.height(),
+        );
+        egui::Area::new(egui::Id::new("gaze-calib"))
+            .fixed_pos(screen.min)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                // Swallow all input while calibrating.
+                let (_, painter) = ui.allocate_painter(screen.size(), egui::Sense::click_and_drag());
+                painter.rect_filled(screen, 0.0, egui::Color32::from_black_alpha(190));
+                painter.text(
+                    egui::pos2(screen.center().x, screen.min.y + 48.0),
+                    egui::Align2::CENTER_CENTER,
+                    "Follow the dot with your eyes — sit comfortably, Esc cancels",
+                    egui::FontId::proportional(16.0),
+                    theme::INK,
+                );
+                painter.text(
+                    egui::pos2(screen.center().x, screen.min.y + 72.0),
+                    egui::Align2::CENTER_CENTER,
+                    format!("{} / {}", idx + 1, GRID.len()),
+                    egui::FontId::proportional(13.0),
+                    theme::INK_DIM,
+                );
+                let t = now - since;
+                if t < SETTLE {
+                    // Shrinking ring: "the dot is here, get your eyes on it".
+                    let r = 26.0 - 16.0 * (t / SETTLE) as f32;
+                    painter.circle_stroke(pos, r, egui::Stroke::new(2.0, theme::accent_a()));
+                    painter.circle_filled(pos, 4.0, theme::accent_a());
+                } else {
+                    // Pulsing collect phase — features recorded every frame.
+                    let pulse = 1.0 + 0.25 * ((now * 9.0).sin() as f32);
+                    painter.circle_filled(pos, 6.0 * pulse, theme::accent_a());
+                    painter.circle_stroke(
+                        pos,
+                        11.0,
+                        egui::Stroke::new(1.5, theme::accent_a().gamma_multiply(0.5)),
+                    );
+                }
+            });
+        let t = now - since;
+        if t >= SETTLE {
+            let _ = kernel.syscall(
+                self.pid,
+                Syscall::GazeCalib(pmos_abi::GazeCalibOp::Sample { x: fx, y: fy }),
+            );
+        }
+        if t >= SETTLE + COLLECT {
+            if idx + 1 >= GRID.len() {
+                self.calib = None;
+                // The kernel fits, persists, and reports quality as a toast.
+                let _ =
+                    kernel.syscall(self.pid, Syscall::GazeCalib(pmos_abi::GazeCalibOp::Finish));
+            } else {
+                self.calib = Some((idx + 1, now));
+            }
+        }
+        ctx.request_repaint();
+    }
+
     /// Gaze assist (CSL spec §6, opt-in): soft-highlight the window the user
     /// is looking at. Deliberately passive — it never moves the cursor,
     /// never focuses, never clicks; the hand stays the precision instrument.
     fn gaze_overlay(&mut self, ctx: &egui::Context, now: f64) {
+        if self.calib.is_some() {
+            return; // no halo during calibration — the dot is the target
+        }
         let Some(((fx, fy), at)) = self.gaze else {
             return;
         };
@@ -1301,8 +1399,8 @@ impl Shell {
                 AppKind::Settings => {
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
-                        .show(ui, |ui| state.settings_ui(ui, kernel, pid));
-                    None
+                        .show(ui, |ui| state.settings_ui(ui, kernel, pid))
+                        .inner
                 }
                 AppKind::Terminal => state.terminal_ui(ui, kernel, pid),
                 AppKind::Files => state.files_ui(ui, kernel, pid),
@@ -1335,6 +1433,23 @@ impl Shell {
         }
         for i in to_close.into_iter().rev() {
             self.close(kernel, i);
+        }
+        // Drain the actions apps handed back this frame. (This drain went
+        // missing in a refactor — Files/Terminal ▶ Launch silently did
+        // nothing; same lesson as the browser_view bug below.)
+        for action in actions {
+            match action {
+                AppAction::LaunchConjure(doc) => {
+                    if let Err(e) = self.spawn_conjure(kernel, &doc, now) {
+                        self.toast(format!("⚠ launch failed: {e}"), now);
+                    }
+                }
+                AppAction::CalibrateGaze => self.calib = Some((0, now)),
+                AppAction::ResetGazeCalib => {
+                    let _ = kernel
+                        .syscall(self.pid, Syscall::GazeCalib(pmos_abi::GazeCalibOp::Reset));
+                }
+            }
         }
         // Hand the Browser's content rect to the platform — THIS was the
         // "browser loads nothing" bug: the local result was dropped here,

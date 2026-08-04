@@ -51,7 +51,7 @@
       video.srcObject = stream;
       await video.play();
 
-      worker = new Worker("gesture-worker.js?v=116", { type: "module" });
+      worker = new Worker("gesture-worker.js?v=117", { type: "module" });
       worker.onmessage = (e) => {
         const m = e.data;
         if (m.type === "ready") {
@@ -67,6 +67,7 @@
           window.wasmBindings.pmos_face_status?.(m.ok, m.msg || "");
         } else if (m.type === "face") {
           if (m.mesh && m.mesh.length) window.wasmBindings.pmos_face_mesh(m.mesh);
+          if (m.feat && m.feat.length) window.wasmBindings.pmos_gaze_features?.(m.feat);
           window.wasmBindings.pmos_face_frame(m.blinkL, m.blinkR, m.jaw ?? 0, m.brow ?? 0, m.chinX ?? -1, m.chinY ?? -1, m.gazeX ?? -1, m.gazeY ?? -1);
         } else if (m.type === "error") {
           console.error("[pmos gestures] worker:", m.message);

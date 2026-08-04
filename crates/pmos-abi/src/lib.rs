@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// (major, minor). Additive changes bump minor; breaking changes bump major.
-pub const ABI_VERSION: (u16, u16) = (1, 16);
+pub const ABI_VERSION: (u16, u16) = (1, 17);
 
 // ---------- handles ----------
 
@@ -126,6 +126,13 @@ pub enum Syscall {
     VoiceCapture {
         start: bool,
     },
+    /// Gaze calibration (ABI 1.17, CSL spec §6): the shell's 9-point
+    /// calibration overlay drives these. `Sample` records the latest face
+    /// feature vector against a known screen target (fractions, 0..1);
+    /// `Finish` fits the per-user ridge regression, persists it to
+    /// /settings/gaze_calib.json and reports quality as a Notice.
+    /// Requires `InputRawHands` (the same trust level as raw landmarks).
+    GazeCalib(GazeCalibOp),
     // ai
     AiPrompt {
         agent: AgentId,
@@ -236,6 +243,20 @@ impl Default for HandsTuning {
             pinch_exit: 0.55,
         }
     }
+}
+
+/// Gaze-calibration operations (ABI 1.17).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GazeCalibOp {
+    /// Record the current face features against this screen target
+    /// (fractions of the screen, origin top-left).
+    Sample { x: f32, y: f32 },
+    /// Fit the regression from all samples, persist, report quality.
+    Finish,
+    /// Discard collected samples (calibration aborted).
+    Cancel,
+    /// Forget the stored calibration — back to the coarse heuristic.
+    Reset,
 }
 
 /// LLM provider profile (AI System spec §2).

@@ -76,6 +76,7 @@ thread_local! {
     static FACE_FRAME: RefCell<Option<[f32; 8]>> = const { RefCell::new(None) };
     static FACE_MESH: RefCell<Option<Vec<f32>>> = const { RefCell::new(None) };
     static FACE_STATUS: RefCell<Option<(bool, String)>> = const { RefCell::new(None) };
+    static GAZE_FEATS: RefCell<Option<Vec<f32>>> = const { RefCell::new(None) };
     static MIC_GRANTED: RefCell<bool> = const { RefCell::new(false) };
     static VOICE_TRANSCRIPTS: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
     static VFS_LOADED: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
@@ -223,6 +224,13 @@ pub fn pmos_face_mesh(data: Vec<f32>) {
 #[wasm_bindgen]
 pub fn pmos_face_status(ok: bool, msg: String) {
     FACE_STATUS.with(|f| *f.borrow_mut() = Some((ok, msg)));
+}
+
+/// Per-frame gaze feature vector (ABI 1.17) — feeds the calibrated
+/// per-user regression; derived scalars only, never pixels.
+#[wasm_bindgen]
+pub fn pmos_gaze_features(data: Vec<f32>) {
+    GAZE_FEATS.with(|f| *f.borrow_mut() = Some(data));
 }
 
 /// Preview pixels for the Hand Tracker viewer (RGBA, mirrored). These go
@@ -622,6 +630,11 @@ impl OsApp {
         }
         // Face layer (M10, opt-in): blendshapes → kernel; double-blink
         // injects a click at the current pointer (accessibility).
+        // Features first: the calibrated gaze prediction must land before
+        // face_frame decides whether the heuristic/loss paths apply.
+        if let Some(feats) = GAZE_FEATS.with(|f| f.borrow_mut().take()) {
+            self.kernel.gaze_features(feats);
+        }
         if let Some([bl, br, jaw, brow, cx, cy, gx, gy]) =
             FACE_FRAME.with(|f| f.borrow_mut().take())
         {
@@ -672,6 +685,16 @@ impl OsApp {
             log::info!("vfs ready (persistent: {ok})");
             apply_voice_config(&self.kernel);
             apply_face_config(&mut self.kernel);
+            // Restore the per-user gaze calibration (ABI 1.17).
+            if let Some(c) = self
+                .kernel
+                .vfs
+                .read("/settings/gaze_calib.json")
+                .and_then(|b| serde_json::from_slice(&b).ok())
+            {
+                self.kernel.gaze_calib = Some(c);
+                log::info!("gaze calibration restored");
+            }
             // Restore the AI budget meter (ABI 1.15).
             if let Some(v) = self
                 .kernel

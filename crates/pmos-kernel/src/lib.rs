@@ -65,6 +65,12 @@ pub struct Kernel {
     /// Gaze assist opt-in (Settings → Face → /settings/face.json "gaze");
     /// set by the platform. Off = gaze scalars are dropped at the door.
     pub gaze_enabled: bool,
+    /// Calibrated per-user gaze mapping (ABI 1.17). None = coarse heuristic.
+    pub gaze_calib: Option<input::gaze::GazeCalib>,
+    /// Latest raw gaze feature vector from the worker (camera space).
+    gaze_feats: Option<Vec<f32>>,
+    /// (features, screen target) pairs from the calibration overlay.
+    calib_samples: Vec<(Vec<f32>, f32, f32)>,
     /// Previous frame's two-palm spread (camera-space) for zoom deltas.
     last_palm_spread: Option<f32>,
     /// Previous frame's second-hand pose+centroid (property-control deltas).
@@ -100,6 +106,9 @@ impl Kernel {
             face: FaceState::default(),
             face_click_pending: false,
             gaze_enabled: false,
+            gaze_calib: None,
+            gaze_feats: None,
+            calib_samples: Vec::new(),
             last_palm_spread: None,
             last_hand2: None,
             ai: ai::AiState::default(),
@@ -237,6 +246,41 @@ impl Kernel {
     /// A system notice → shell toast (ABI 1.15) — e.g. face-engine status.
     pub fn notice(&mut self, text: String) {
         self.push_event(proc::SHELL_PID, KernelEvent::Notice { text });
+    }
+
+    /// Smooth a gaze estimate and stream it to the shell. Heavy EMA — a
+    /// highlight that flickers is worse than one that lags a little.
+    fn emit_gaze(&mut self, x: f32, y: f32) {
+        let target = (x, y);
+        let (px, py) = self.face.gaze.unwrap_or(target);
+        const ALPHA: f32 = 0.25;
+        let sm = (px + (target.0 - px) * ALPHA, py + (target.1 - py) * ALPHA);
+        self.face.gaze = Some(sm);
+        self.face.gaze_announced = true;
+        self.push_event(
+            proc::SHELL_PID,
+            KernelEvent::Gaze {
+                x: sm.0,
+                y: sm.1,
+                active: true,
+            },
+        );
+    }
+
+    /// Per-frame gaze feature vector from the worker (ABI 1.17). With a
+    /// calibration fitted, this IS the gaze estimate — accurate to a few
+    /// percent of the screen instead of thirds; the heuristic never runs.
+    pub fn gaze_features(&mut self, v: Vec<f32>) {
+        if self.gaze_enabled {
+            if let Some(calib) = &self.gaze_calib {
+                if let Some((x, y)) = calib.predict(&v) {
+                    // Allow slight over-range so edge targets aren't biased
+                    // inward; the shell clamps for display.
+                    self.emit_gaze(x.clamp(-0.2, 1.2), y.clamp(-0.2, 1.2));
+                }
+            }
+        }
+        self.gaze_feats = Some(v);
     }
 
     /// Face mesh frame → viewer overlay (ABI 1.16). Same policy as raw hand
@@ -462,26 +506,13 @@ impl Kernel {
         now: f64,
     ) {
         if self.gaze_enabled && gaze_x >= 0.0 {
-            // Mirror x (camera vs. screen, same convention as the hands) and
-            // smooth heavily — a highlight that flickers between windows is
-            // worse than one that lags half a second.
-            let target = (1.0 - gaze_x, gaze_y);
-            let (px, py) = self.face.gaze.unwrap_or(target);
-            const ALPHA: f32 = 0.25;
-            let sm = (
-                px + (target.0 - px) * ALPHA,
-                py + (target.1 - py) * ALPHA,
-            );
-            self.face.gaze = Some(sm);
-            self.face.gaze_announced = true;
-            self.push_event(
-                proc::SHELL_PID,
-                KernelEvent::Gaze {
-                    x: sm.0,
-                    y: sm.1,
-                    active: true,
-                },
-            );
+            // Calibrated users get their prediction from gaze_features()
+            // (which arrives with the same face message); the heuristic
+            // only runs uncalibrated. Mirror x — camera vs. screen, the
+            // same convention as the hands.
+            if self.gaze_calib.is_none() {
+                self.emit_gaze(1.0 - gaze_x, gaze_y);
+            }
         } else if self.face.gaze_announced {
             self.face.gaze = None;
             self.face.gaze_announced = false;
@@ -944,6 +975,46 @@ impl KernelApi for Kernel {
                 }
                 Ok(Reply::None)
             }
+            Syscall::GazeCalib(op) => {
+                // Same trust level as raw landmarks — the shell's overlay.
+                self.require(caller, &Capability::InputRawHands)?;
+                match op {
+                    pmos_abi::GazeCalibOp::Sample { x, y } => {
+                        if let Some(f) = &self.gaze_feats {
+                            if self.calib_samples.len() < 2048 {
+                                self.calib_samples.push((f.clone(), x, y));
+                            }
+                        }
+                    }
+                    pmos_abi::GazeCalibOp::Finish => {
+                        let samples = std::mem::take(&mut self.calib_samples);
+                        match input::gaze::fit(&samples) {
+                            Some((calib, err)) => {
+                                if let Ok(json) = serde_json::to_vec(&calib) {
+                                    let _ = self.vfs.write("/settings/gaze_calib.json", json);
+                                }
+                                self.gaze_calib = Some(calib);
+                                self.notice(format!(
+                                    "🎯 gaze calibrated — mean error ≈ {:.0}% of the screen",
+                                    err * 100.0
+                                ));
+                            }
+                            None => self.notice(
+                                "⚠ gaze calibration failed — the face was lost during too many points; try again"
+                                    .into(),
+                            ),
+                        }
+                    }
+                    pmos_abi::GazeCalibOp::Cancel => self.calib_samples.clear(),
+                    pmos_abi::GazeCalibOp::Reset => {
+                        self.gaze_calib = None;
+                        self.calib_samples.clear();
+                        let _ = self.vfs.delete("/settings/gaze_calib.json");
+                        self.notice("gaze calibration cleared — back to the coarse estimate".into());
+                    }
+                }
+                Ok(Reply::None)
+            }
             other => {
                 log::debug!("unimplemented syscall from {caller:?}: {other:?}");
                 Err(ErrorCode::Unsupported)
@@ -1108,6 +1179,66 @@ mod tests {
         )
         .unwrap();
         assert_eq!(k.ai.usage.1, before);
+    }
+
+    #[test]
+    fn gaze_calibration_end_to_end() {
+        let mut k = Kernel::new();
+        let shell = register(&mut k, "shell");
+        let app = register(&mut k, "app");
+        // Capability-gated like raw landmarks.
+        assert!(matches!(
+            k.syscall(
+                app,
+                Syscall::GazeCalib(pmos_abi::GazeCalibOp::Sample { x: 0.5, y: 0.5 })
+            ),
+            Err(ErrorCode::CapabilityDenied)
+        ));
+
+        k.gaze_enabled = true;
+        // Synthetic eye: screen x tracks feature 0, screen y tracks feature
+        // 5, everything else constant — the fit must recover this mapping.
+        let feats_for = |tx: f32, ty: f32, jitter: f32| -> Vec<f32> {
+            let mut f = vec![0.3f32; input::gaze::FEATS];
+            f[0] = (tx - 0.1) / 0.8 + jitter * 0.002;
+            f[5] = (ty - 0.2) / 0.6 - jitter * 0.002;
+            f
+        };
+        let targets = [0.08f32, 0.5, 0.92];
+        for &tx in &targets {
+            for &ty in &targets {
+                for j in 0..15 {
+                    k.gaze_features(feats_for(tx, ty, j as f32));
+                    k.syscall(shell, Syscall::GazeCalib(pmos_abi::GazeCalibOp::Sample { x: tx, y: ty }))
+                        .unwrap();
+                }
+            }
+        }
+        k.syscall(shell, Syscall::GazeCalib(pmos_abi::GazeCalibOp::Finish))
+            .unwrap();
+        assert!(k.gaze_calib.is_some(), "fit must succeed on clean data");
+        assert!(
+            k.vfs.read("/settings/gaze_calib.json").is_some(),
+            "calibration persists"
+        );
+        // Prediction: a fresh unseen point lands where it should.
+        let _ = k.poll_events(proc::SHELL_PID); // drain
+        k.gaze_features(feats_for(0.7, 0.62, 0.0));
+        let ev = k
+            .poll_events(proc::SHELL_PID)
+            .into_iter()
+            .find_map(|e| match e {
+                KernelEvent::Gaze { x, y, active: true } => Some((x, y)),
+                _ => None,
+            })
+            .expect("calibrated gaze emits");
+        assert!((ev.0 - 0.7).abs() < 0.05, "x {}", ev.0);
+        assert!((ev.1 - 0.62).abs() < 0.05, "y {}", ev.1);
+        // Reset forgets everything.
+        k.syscall(shell, Syscall::GazeCalib(pmos_abi::GazeCalibOp::Reset))
+            .unwrap();
+        assert!(k.gaze_calib.is_none());
+        assert!(k.vfs.read("/settings/gaze_calib.json").is_none());
     }
 
     #[test]

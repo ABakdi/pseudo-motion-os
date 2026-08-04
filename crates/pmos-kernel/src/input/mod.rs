@@ -5,6 +5,7 @@
 //! (`hands`): landmark ingestion, One-Euro filtering, pose classification.
 
 pub mod fusion;
+pub mod gaze;
 pub mod hands;
 pub mod signs;
 
