@@ -12,6 +12,12 @@ Entry format:
 
 ---
 
+## [2026-08-04] — Boot-race fix: settings now actually restore ("gaze never turns on automatically")
+### Code
+- **Root cause found (witnessed live, finally explained)**: the kernel calls `pmosStorage.loadAll` from its first frames — which can run **before trunk assigns `window.wasmBindings`** (the winit event loop starts inside wasm init). The walk threw on the missing binding, the error callback threw on the same missing binding, and the whole boot load died as a **silent unhandled rejection**: no `vfs ready`, no settings restored — face/gaze/appearance/voice all silently off after a reload. `loadAll` now waits for the bindings (up to 10 s) before touching them. This was intermittent (timing), which is why some boots worked.
+- **Settings → Face de-trapped**: the Gaze assist checkbox lived inside `add_enabled_ui(face_enabled…)` — with Face gestures off it silently ignored clicks ("no matter how I select deselect"). It's now always clickable and checking it pulls Face gestures on with it.
+- **Calibration tells you what's wrong, live**: `Sample` replies with the kernel's running sample count; the overlay shows "⚠ no face detected — check lighting and camera" *during* calibration when nothing accumulates, instead of failing after 15 wasted seconds; the failure toast now reports "N usable samples of M (need 20+)" and points at the Hand Tracker mesh as the health check.
+
 ## [2026-08-04] — Calibrated gaze: from thirds-of-the-screen to a few percent (ABI 1.17)
 ### Code
 - **Research first** (user asked for a specialized, maximally accurate free model): WebGazer reaches ~4°/100–150 px via a self-calibrating regression over eye features; L2CS-Net (deep CNN, ONNX-in-browser) reaches 3.9° but costs ~90 MB + 15–20 fps of GPU **and still needs calibration to map to the screen**; the best MediaPipe results use iris landmarks + per-user calibration + regression. Conclusion: we already run the right model — the missing piece was **calibration**.

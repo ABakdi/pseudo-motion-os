@@ -82,6 +82,18 @@
 
   // ---- boot: pick a backend, load everything ----
   async function loadAll() {
+    // The kernel calls this from its first frames — which can run BEFORE
+    // trunk assigns window.wasmBindings (the winit event loop starts inside
+    // wasm init). Calling into an undefined binding threw, the error path
+    // threw too, and the whole boot load died as a silent unhandled
+    // rejection: no settings restored, face/gaze "never turns on". Wait.
+    for (let i = 0; i < 200 && !window.wasmBindings?.pmos_vfs_ready; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (!window.wasmBindings?.pmos_vfs_ready) {
+      console.error("[pmos storage] wasm bindings never appeared — no persistence");
+      return;
+    }
     const out = [];
     async function walk(dir, prefix) {
       for await (const [name, handle] of dir.entries()) {

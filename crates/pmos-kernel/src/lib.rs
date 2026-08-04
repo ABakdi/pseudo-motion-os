@@ -985,9 +985,19 @@ impl KernelApi for Kernel {
                                 self.calib_samples.push((f.clone(), x, y));
                             }
                         }
+                        // Reply with the running count so the overlay can
+                        // warn LIVE when nothing is accumulating (face not
+                        // tracked) instead of failing at the very end.
+                        return Ok(Reply::Bytes(
+                            self.calib_samples.len().to_string().into_bytes(),
+                        ));
                     }
                     pmos_abi::GazeCalibOp::Finish => {
                         let samples = std::mem::take(&mut self.calib_samples);
+                        let valid = samples
+                            .iter()
+                            .filter(|(f, _, _)| input::gaze::expand(f).is_some())
+                            .count();
                         match input::gaze::fit(&samples) {
                             Some((calib, err)) => {
                                 if let Ok(json) = serde_json::to_vec(&calib) {
@@ -999,10 +1009,11 @@ impl KernelApi for Kernel {
                                     err * 100.0
                                 ));
                             }
-                            None => self.notice(
-                                "⚠ gaze calibration failed — the face was lost during too many points; try again"
-                                    .into(),
-                            ),
+                            None => self.notice(format!(
+                                "⚠ gaze calibration failed — {valid} usable samples of {} (need 20+). \
+                                 Face tracking must be running: the Hand Tracker shows your face as a dot mesh when it is",
+                                samples.len()
+                            )),
                         }
                     }
                     pmos_abi::GazeCalibOp::Cancel => self.calib_samples.clear(),

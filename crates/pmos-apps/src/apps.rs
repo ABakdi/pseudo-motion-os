@@ -1520,14 +1520,18 @@ impl AppState {
                 "Face gestures — double-blink = click (experimental)",
             )
             .changed();
-        ui.add_enabled_ui(self.face_enabled, |ui| {
-            changed |= ui
-                .checkbox(
-                    &mut self.face_gaze,
-                    "Gaze assist — the window you look at glows (experimental)",
-                )
-                .changed();
-        });
+        // Never a disabled trap: gaze is always clickable, and checking it
+        // pulls face tracking on with it (gaze needs the face model).
+        let gaze_resp = ui.checkbox(
+            &mut self.face_gaze,
+            "Gaze assist — the window you look at glows (experimental)",
+        );
+        if gaze_resp.changed() {
+            changed = true;
+            if self.face_gaze {
+                self.face_enabled = true;
+            }
+        }
         if changed {
             let json = serde_json::json!({
                 "enabled": self.face_enabled,

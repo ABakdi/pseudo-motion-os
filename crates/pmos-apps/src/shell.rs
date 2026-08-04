@@ -71,8 +71,9 @@ pub struct Shell {
     /// Latest gaze estimate (screen fractions) + arrival time (CSL §6):
     /// soft-highlights the window under the gaze, expires when stale.
     gaze: Option<((f32, f32), f64)>,
-    /// 9-point gaze calibration overlay: (target index, phase start time).
-    calib: Option<(usize, f64)>,
+    /// 9-point gaze calibration overlay: (target index, phase start time,
+    /// kernel's sample count — 0 while stuck = face isn't tracked).
+    calib: Option<(usize, f64, u32)>,
 }
 
 impl Shell {
@@ -1105,7 +1106,7 @@ impl Shell {
         ];
         const SETTLE: f64 = 0.6; // eye travel + saccade settle
         const COLLECT: f64 = 0.9; // sampling window
-        let Some((idx, since)) = self.calib else {
+        let Some((idx, since, count)) = self.calib else {
             return;
         };
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1157,13 +1158,28 @@ impl Shell {
                         egui::Stroke::new(1.5, theme::accent_a().gamma_multiply(0.5)),
                     );
                 }
+                // Live starvation warning: past the first collect window and
+                // the kernel still has ZERO samples → the face isn't being
+                // tracked; tell the user NOW, not after 15 wasted seconds.
+                if count == 0 && (idx > 0 || t > SETTLE + COLLECT * 0.7) {
+                    painter.text(
+                        egui::pos2(screen.center().x, screen.max.y - 60.0),
+                        egui::Align2::CENTER_CENTER,
+                        "⚠ no face detected — check lighting and camera, or Esc to cancel",
+                        egui::FontId::proportional(15.0),
+                        egui::Color32::from_rgb(0xff, 0x9d, 0x6b),
+                    );
+                }
             });
         let t = now - since;
+        let mut count = count;
         if t >= SETTLE {
-            let _ = kernel.syscall(
+            if let Ok(Reply::Bytes(b)) = kernel.syscall(
                 self.pid,
                 Syscall::GazeCalib(pmos_abi::GazeCalibOp::Sample { x: fx, y: fy }),
-            );
+            ) {
+                count = String::from_utf8_lossy(&b).parse().unwrap_or(count);
+            }
         }
         if t >= SETTLE + COLLECT {
             if idx + 1 >= GRID.len() {
@@ -1172,8 +1188,10 @@ impl Shell {
                 let _ =
                     kernel.syscall(self.pid, Syscall::GazeCalib(pmos_abi::GazeCalibOp::Finish));
             } else {
-                self.calib = Some((idx + 1, now));
+                self.calib = Some((idx + 1, now, count));
             }
+        } else {
+            self.calib = Some((idx, since, count));
         }
         ctx.request_repaint();
     }
@@ -1444,7 +1462,7 @@ impl Shell {
                         self.toast(format!("⚠ launch failed: {e}"), now);
                     }
                 }
-                AppAction::CalibrateGaze => self.calib = Some((0, now)),
+                AppAction::CalibrateGaze => self.calib = Some((0, now, 0)),
                 AppAction::ResetGazeCalib => {
                     let _ = kernel
                         .syscall(self.pid, Syscall::GazeCalib(pmos_abi::GazeCalibOp::Reset));
